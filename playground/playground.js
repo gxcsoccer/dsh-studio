@@ -1,63 +1,90 @@
 /**
- * 四个方案渲染同一次会话。参照的是官方 web 客户端的真实表面：
- * 三栏、Chat/Trajectory 双视图、审批接管输入栏、composer 底部一排
- * 访问模式 / 计划 / 模型 / 上下文环、侧栏状态点分优先级。
+ * 两个轴：皮肤（视觉语言）× 结构（三栏怎么排）。
+ * 表面按官方 dsh web 客户端建：三栏、Chat/Trajectory、审批接管输入栏、
+ * composer 底部访问模式/计划/模型/上下文环、侧栏状态点分优先级。
  */
 
-const VARIANTS = [
+const SKINS = [
+  {
+    id: "blueprint",
+    zh: "蓝图",
+    en: "Blueprint",
+    sw: ["#fff", "#1313ba", "#cbcbef"],
+    blurb: "一个色相、0 圆角、等宽当 UI 字",
+    thesis:
+      "notion.com/product/dev 那套 campaign theme 的直译：一个色相十个值，正文是品牌蓝 66% 透明而不是灰；圆角全 0，只有代码框留 4px；阴影归零，全窗只有一种线色；语法高亮是同色四级明度阶。",
+    fit: "Agent 要同时摆 prose、diff、终端三种东西。<b>同一个色相做完全部层级</b>，代码块就不会像贴进来的第三方组件。",
+    risk: "蓝铺满会有点冷，长时间看偏硬。暗色是把蓝场翻过来，不是灰黑。",
+  },
+  {
+    id: "graphite",
+    zh: "石墨",
+    en: "Graphite",
+    sw: ["#fff", "#000", "#ebebeb"],
+    blurb: "无彩、极端克制、纯黑暗色",
+    thesis:
+      "一个口音都不给。层级只靠字重、字距和 1px 线，颜色只在状态上出现。暗色是真 #000，不是深灰。小圆角 5–8px，克制但不冷。",
+    fit: "Agent 界面本来就吵——工具在跑、状态在变、diff 有红绿。<b>底子彻底无彩，状态色才有地方响。</b>",
+    risk: "截图不出彩，评审会上最吃亏。它的好要用久了才认。",
+  },
+  {
+    id: "vellum",
+    zh: "犊皮",
+    en: "Vellum",
+    sw: ["#fbfaf7", "#24408e", "#cdc7b8"],
+    blurb: "衬线正文、线不成框、编辑性",
+    thesis:
+      "把会话当印出来的文稿：暖白纸、衬线正文 16px/27px、卡片退成规则线（工具行只有一条上边），代码窗不围框、只留一条左规则。深墨蓝做唯一动作色。",
+    fit: "Agent 会话<b>本身就是文档</b>——要读、要引用、要归档。这套让它读起来像一份东西，而不是一条聊天记录。",
+    risk: "密度最低，同屏能放的最少。真要跑长任务时信息量吃紧。",
+  },
+  {
+    id: "instrument",
+    zh: "仪器",
+    en: "Instrument",
+    sw: ["#e9e8e4", "#16161a", "#ff5c00"],
+    blurb: "机加工面板、字冠标签、一个热口音",
+    thesis:
+      "Braun / TE 那一路：2px 机加工圆角、9px 全大写 0.13em 字距的标签、所有数字等宽且表格数字对齐、方点不是圆点。橙色<b>只给「正在跑」</b>，别处一律不许出现。",
+    fit: "这是一台<b>驱动 agent 的仪器</b>。热口音只标一件事——现在什么在动——所以一眼就知道该看哪。读数常驻，不用点开。",
+    risk: "标签全大写对中文不友好，得混排。橙色一旦滥用立刻塌。",
+  },
+  {
+    id: "phosphor",
+    zh: "磷光",
+    en: "Phosphor",
+    sw: ["#0b0c0b", "#ffb000", "#2a2f28"],
+    blurb: "整机等宽、字符网格、琥珀",
+    thesis:
+      "把终端做好看，而不是做旧。全窗等宽、行高锁 20px 对齐字符格、方点、块状光标、琥珀单口音。不加扫描线、不加噪点、不做拟物。",
+    fit: "这个 agent 的主业就是<b>跑 shell、改文件</b>。终端美学不是隐喻，是它真实的工作面；`bash` 输出在这里最不违和。",
+    risk: "最容易滑向 cosplay。中文在等宽里排版会松，需要单独调。",
+  },
   {
     id: "web",
-    name: "Web reference",
     zh: "官方 web",
-    tag: "参照",
-    thesis:
-      "官方 dsh web 今天的样子，用它自己的灰阶画的。放在这里是为了量差距——尤其是右边那栏：详情面板在已发布版本里有实现、有文案，但<b>没有入口</b>，点工具行打不开它。",
-    edge: "—",
-    cost: "—",
-    pick: "开对比模式，把它放 B 窗。",
-  },
-  {
-    id: "console",
-    name: "Console",
-    zh: "控制台",
-    tag: "最忠实",
-    thesis:
-      "同样的三栏，换成 dev-platform 的语言：一个色相、0 圆角、发丝线、等宽当 UI 字体、语法高亮走同色明度阶。桌面在这里补的是官方没接上的那条线——<b>详情面板真的能开</b>，点任意工具行就在右边展开输入 / 输出 / 计时。",
-    edge: "接通详情面板；审批可以给持久授权，不只是「允许一次」。",
-    cost: "结构最保守。它赢在密度和完成度，不赢在新鲜感。",
-    pick: "要一个能对着官方 UI 逐条说清「我们哪里更好」的版本。",
-  },
-  {
-    id: "bench",
-    name: "Bench",
-    zh: "工作台",
-    tag: "偏工程",
-    thesis:
-      "对话退回窄栏，右边是常驻工作台：当前 diff、终端、读到的文件都在那儿，跟着 agent 走。取的是那页「代码窗 + 焊在底边的终端条」那个部件，把它放大成一整栏。",
-    edge: "工具产物有固定位置，不用在流里往回翻。文件页签常驻。",
-    cost: "1180 以下要把工作台压成抽屉。窄屏是它的软肋。",
-    pick: "主要用途是看着 agent 改代码，而不是聊。",
-  },
-  {
-    id: "ledger",
-    name: "Ledger",
-    zh: "账本",
-    tag: "偏观测",
-    thesis:
-      "把官方的 Trajectory 视图提成主表面。上面是按真实耗时投影的时间轴，下面是事件账本；带 ● 的是 surface 事件（会进模型上下文的只有 user/message、assistant/message、tool/result 三种）。聊天变成次要页签。",
-    edge: "长任务、跑飞了要复盘、要看 TTFT 和工具占比的时候，这是唯一能看的视图。",
-    cost: "不适合日常对话。要跟别的方案配着用，不是单独选。",
-    pick: "跑长任务、调 agent、排查为什么慢。",
+    en: "Web reference",
+    sw: ["#fff", "#2b2d31", "#e6e6e9"],
+    blurb: "参照系 · 官方今天的样子",
+    thesis: "官方 dsh web 现在的样子，用它自己的灰阶画的。放这里是为了量差距。",
+    fit: "右栏那个详情面板<b>在发布版里没有入口</b>——openDetails 有实现但无人调用。其余五套都把它接上了。",
+    risk: "—",
   },
 ];
 
-const state = { a: "console", b: "web", scene: "session", look: "paper", cmp: false, focus: "a" };
-const hosts = { a: document.getElementById("host-a"), b: document.getElementById("host-b") };
-const timers = new WeakMap();
-const slow = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const STRUCTS = [
+  { id: "console", zh: "控制台", note: "详情面板接通：点工具行展开输入 / 输出 / 计时。" },
+  { id: "bench", zh: "工作台", note: "右边常驻工作面：diff、终端、文件页签，跟着 agent 走。" },
+  { id: "ledger", zh: "账本", note: "Trajectory 提为主表面：时间轴按真实耗时投影。" },
+];
 
-const byId = (id) => VARIANTS.find((v) => v.id === id) || VARIANTS[1];
-const wait = (ms) => new Promise((r) => setTimeout(r, slow ? ms : 0));
+const state = { a: "blueprint", b: "web", s: "console", scene: "session", mode: "light", pg: "light", cmp: false, focus: "a" };
+const hosts = { a: document.getElementById("host-a"), b: document.getElementById("host-b") };
+const runs = new WeakMap();
+const anim = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const skinById = (id) => SKINS.find((s) => s.id === id) || SKINS[0];
+const wait = (ms) => new Promise((r) => setTimeout(r, anim ? ms : 0));
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function el(tag, cls, html) {
   const n = document.createElement(tag);
@@ -66,10 +93,7 @@ function el(tag, cls, html) {
   return n;
 }
 
-/* ————— 语法：四级明度阶 ————— */
-
 const KW = /\b(func|let|var|if|else|return|struct|final|class|enum|await|async|import|self|guard|try|case|switch|private|public|static|extension|throws|in|for|while|true|false|nil|Task)\b/g;
-
 function hl(line) {
   const out = [];
   let rest = line;
@@ -93,34 +117,24 @@ function hl(line) {
     .join("");
 }
 
-/* ————— 代码框 ————— */
+/* ————— 代码窗 ————— */
 
 function readFrame(node, bare) {
   const f = el("div", "codeframe");
-  if (!bare) {
-    f.append(
-      el("div", "cf-bar", `<span class="cf-name">${esc(node.title)}</span><button type="button" class="cf-act">复制</button>`)
-    );
-  }
+  if (!bare) f.append(el("div", "cf-bar", `<span class="cf-name">${esc(node.title)}</span><button class="cf-act">复制</button>`));
   const code = el("pre", "code");
-  node.code.forEach((line, i) => {
-    code.append(el("div", "ln", `<span class="no">${node.startLine + i}</span><span class="tx">${hl(line)}</span>`));
-  });
+  node.code.forEach((line, i) => code.append(el("div", "ln", `<span class="no">${node.startLine + i}</span><span class="tx">${hl(line)}</span>`)));
   f.append(code);
   return f;
 }
 
 function diffFrame(node, bare) {
   const f = el("div", "codeframe");
-  if (!bare) {
-    f.append(
-      el("div", "cf-bar", `<span class="cf-name">${esc(node.title)}</span><button type="button" class="cf-act">复制</button>`)
-    );
-  }
+  if (!bare) f.append(el("div", "cf-bar", `<span class="cf-name">${esc(node.title)}</span><button class="cf-act">复制</button>`));
   const code = el("pre", "code");
-  node.diff.forEach((row) => {
-    const cls = row.op === "+" ? "add" : row.op === "-" ? "del" : "";
-    code.append(el("div", `ln dl ${cls}`, `<span class="no">${row.op.trim() || ""}</span><span class="tx">${hl(row.text)}</span>`));
+  node.diff.forEach((r) => {
+    const cls = r.op === "+" ? "add" : r.op === "-" ? "del" : "";
+    code.append(el("div", `ln dl ${cls}`, `<span class="no">${r.op.trim()}</span><span class="tx">${hl(r.text)}</span>`));
   });
   f.append(code);
   f.append(el("div", "dfoot", `└ ${node.meta}`));
@@ -129,32 +143,23 @@ function diffFrame(node, bare) {
 
 function termFrame(node, bare) {
   const f = el("div", "codeframe");
-  if (!bare) {
-    f.append(
-      el("div", "cf-bar", `<span class="cf-name">${esc(node.cwd)}</span><span class="tmeta">${esc(node.meta)}</span>`)
-    );
-  }
+  if (!bare) f.append(el("div", "cf-bar", `<span class="cf-name">${esc(node.cwd)}</span><span class="tmeta">${esc(node.meta)}</span>`));
   const t = el("pre", "term");
   t.append(el("div", null, `<span class="pr">$ </span>${esc(node.cmd)}`));
   f.append(t);
   return f;
 }
 
-function toolFrame(node, bare) {
-  if (node.render === "diff") return diffFrame(node, bare);
-  if (node.render === "terminal") return termFrame(node, bare);
-  return readFrame(node, bare);
-}
+const frameFor = (n, bare) => (n.render === "diff" ? diffFrame(n, bare) : n.render === "terminal" ? termFrame(n, bare) : readFrame(n, bare));
 
-/** 终端逐行打印，进行中的那行走扫光——不用转圈。 */
-async function printTerm(frame, node, alive) {
-  const t = frame.querySelector(".term");
+async function printTerm(root, node, alive) {
+  const t = root?.querySelector(".term");
   if (!t) return;
   for (const line of node.out) {
     if (!alive()) return;
     const row = el("div", null, `<span class="dim shim">${esc(line)}</span>`);
     t.append(row);
-    await wait(340);
+    await wait(320);
     if (!alive()) return;
     row.querySelector("span").classList.remove("shim");
   }
@@ -167,40 +172,35 @@ function sidebar(scene) {
   const top = el("div", "side-top");
   top.append(el("button", "btn btn-primary", "＋ 新会话"), el("button", "btn btn-sm", "⌕"));
   s.append(top);
-
   WORKSPACES.forEach((ws) => {
     const box = el("div", "ws");
-    box.append(
-      el("button", "ws-h", `<span class="caret">${ws.open ? "▾" : "▸"}</span><b>${ws.name}</b><em>${ws.sessions.length}</em>`)
-    );
-    if (!ws.open) return s.append(box);
-    const list = el("ul", "ses");
-    ws.sessions.forEach((se) => {
-      const current = se.state === "current";
-      // 审批场景里当前会话变成「等待审批」，琥珀点压过运行中
-      const dot = current ? (scene === "approval" ? "wait" : "running") : se.state === "current" ? "running" : se.state;
-      const li = el("li", current ? "cur" : "");
-      li.innerHTML = `<span class="sdot ${dot}"></span><span class="s-t">${se.title}</span><span class="s-when">${
-        current && scene === "approval" ? "待审批" : se.detail || se.when
-      }</span>`;
-      list.append(li);
-    });
-    box.append(list);
+    box.append(el("button", "ws-h", `<span class="caret">${ws.open ? "▾" : "▸"}</span><b>${ws.name}</b><em>${ws.sessions.length}</em>`));
+    if (ws.open) {
+      const list = el("ul", "ses");
+      ws.sessions.forEach((se) => {
+        const cur = se.state === "current";
+        const dot = cur ? (scene === "approval" ? "wait" : "running") : se.state;
+        const li = el("li", cur ? "cur" : "");
+        li.innerHTML = `<span class="sdot ${dot}"></span><span class="s-t">${se.title}</span><span class="s-when">${
+          cur && scene === "approval" ? "待审批" : se.detail || se.when
+        }</span>`;
+        list.append(li);
+      });
+      box.append(list);
+    }
     s.append(box);
   });
-
-  const foot = el("div", "side-foot");
-  foot.innerHTML = `<span>设置</span><span>·</span><span>插件 12</span>`;
-  s.append(foot);
+  s.append(el("div", "side-foot", `<span>设置</span><span>插件 12</span>`));
   return s;
 }
 
-/* ————— 节点流 ————— */
+/* ————— 节点 ————— */
 
-function nodeEl(node, variant) {
+function nodeEl(node, struct) {
   if (node.kind === "user") {
     const n = el("div", "node n-user");
-    n.innerHTML = `<div class="n-meta">你 · ${node.time}</div><p>${esc(node.text)}</p>`;
+    n.innerHTML = `<div class="n-meta">你 · ${node.time}</div>`;
+    n.append(el("p", null, esc(node.text)));
     return n;
   }
   if (node.kind === "assistant") {
@@ -209,7 +209,7 @@ function nodeEl(node, variant) {
       const d = el("details", "think");
       d.innerHTML = `<summary><span class="think-k">思考</span><span class="think-s">${esc(node.reasoning[0])}</span></summary>`;
       const b = el("div", "think-body");
-      node.reasoning.forEach((line) => b.append(el("p", null, esc(line))));
+      node.reasoning.forEach((l) => b.append(el("p", null, esc(l))));
       d.append(b);
       n.append(d);
     }
@@ -225,20 +225,16 @@ function nodeEl(node, variant) {
   }
   if (node.kind === "approval") return null;
 
-  // 工具行。bench 把内容让给工作台，流里只留一行。
   const n = el("div", "node tool run");
   const head = el("button", "tool-h");
-  head.innerHTML =
-    `<span class="tname">${node.tool}</span><span class="ttitle">${esc(node.title)}</span>` +
-    `<span class="tmeta">${esc(node.meta)}</span><span class="tstate"></span>`;
+  head.innerHTML = `<span class="tname">${node.tool}</span><span class="ttitle">${esc(node.title)}</span><span class="tmeta">${esc(node.meta)}</span><span class="tstate"></span>`;
   n.append(head);
-  if (variant !== "bench") {
+  if (struct !== "bench") {
     const body = el("div", "tool-b");
-    body.append(toolFrame(node, true));
+    body.append(frameFor(node, true));
     n.append(body);
     head.addEventListener("click", () => n.classList.toggle("open"));
   }
-  n.dataset.tool = node.tool;
   return n;
 }
 
@@ -246,23 +242,21 @@ function nodeEl(node, variant) {
 
 const SPAN_TOTAL = 12400;
 
-function trajectory(onSelect) {
+function trajectory() {
   const wrap = el("div", "center");
   const tl = el("div", "tl");
   tl.append(el("div", "tl-h", `<b>概览</b><em>轮 3 · 12.4s · 拖选可筛，滚轮缩放</em>`));
   const track = el("div", "tl-track");
   LEDGER.forEach((row) => {
     const who = row.who === "asst" ? "asst" : row.who === "tool" ? "tool" : row.type.startsWith("approval") ? "wait" : "";
-    // span 是 100ms 的倍数，按真实时长投影到时间轴上
     const bar = el("div", `tl-bar ${who}`);
     bar.style.left = `${(row.ms / SPAN_TOTAL) * 100}%`;
     bar.style.width = `${Math.max(((row.span * 100) / SPAN_TOTAL) * 100, 0.8)}%`;
-    bar.style.top = `${row.who === "asst" ? 4 : row.who === "tool" ? 14 : 24}px`;
+    bar.style.top = `${row.who === "asst" ? 3 : row.who === "tool" ? 13 : 23}px`;
     bar.title = `${row.type} · ${(row.ms / 1000).toFixed(1)}s`;
     track.append(bar);
   });
-  tl.append(track);
-  tl.append(el("div", "tl-ticks", `<span>0s</span><span>3s</span><span>6s</span><span>9s</span><span>12s</span>`));
+  tl.append(track, el("div", "tl-ticks", `<span>0s</span><span>3s</span><span>6s</span><span>9s</span><span>12s</span>`));
   wrap.append(tl);
 
   const scroll = el("div", "flow");
@@ -273,14 +267,11 @@ function trajectory(onSelect) {
   LEDGER.forEach((row, i) => {
     const tr = el("tr", i === 8 ? "sel" : "");
     tr.innerHTML =
-      `<td class="lq">${row.seq}</td>` +
-      `<td class="lt">${row.type}${row.surface ? '<span class="surf" title="surface 事件"></span>' : ""}</td>` +
-      `<td class="lc">${esc(row.text)}</td>` +
-      `<td class="lm">${(row.ms / 1000).toFixed(1)}s</td>`;
+      `<td class="lq">${row.seq}</td><td class="lt">${row.type}${row.surface ? '<span class="surf"></span>' : ""}</td>` +
+      `<td class="lc">${esc(row.text)}</td><td class="lm">${(row.ms / 1000).toFixed(1)}s</td>`;
     tr.addEventListener("click", () => {
       tb.querySelectorAll("tr").forEach((n) => n.classList.remove("sel"));
       tr.classList.add("sel");
-      onSelect?.(row);
     });
     tb.append(tr);
   });
@@ -292,63 +283,37 @@ function trajectory(onSelect) {
 
 /* ————— 右栏 ————— */
 
-function detailsRail(variant, scene) {
+function detailsRail(skin, scene) {
   const r = el("aside", "rail");
-  r.append(el("div", "rail-h", `<b>详情</b><em>${variant === "web" ? "无入口" : "read · 42–61"}</em>`));
-
-  if (variant === "web") {
-    const e = el("div", "empty");
-    e.innerHTML =
-      `<p>点消息流里的工具行查看详情。</p>` +
-      `<p class="deadnote">openDetails 已实现但无人调用<br />这一栏在发布版里打不开</p>`;
-    r.append(e);
+  r.append(el("div", "rail-h", `<b>详情</b><em>${skin === "web" ? "无入口" : "read · 42–61"}</em>`));
+  if (skin === "web") {
+    r.append(
+      el("div", "empty", `<p>点消息流里的工具行查看详情。</p><p class="deadnote">openDetails 已实现但无人调用<br />这一栏在发布版里打不开</p>`)
+    );
     return r;
   }
-
   const s1 = el("div", "sect");
   s1.append(el("h4", null, "输入"));
-  s1.append(
-    el(
-      "dl",
-      "kv",
-      `<dt>tool</dt><dd class="mono">read</dd>` +
-        `<dt>path</dt><dd class="mono">app/…/WorkspaceStore.swift</dd>` +
-        `<dt>range</dt><dd class="mono">42–61</dd>`
-    )
-  );
+  s1.append(el("dl", "kv", `<dt>tool</dt><dd class="mono">read</dd><dt>path</dt><dd class="mono">app/…/WorkspaceStore.swift</dd><dt>range</dt><dd class="mono">42–61</dd>`));
   r.append(s1);
-
   const s2 = el("div", "sect");
   s2.append(el("h4", null, "输出"));
   const f = readFrame(NODES[2], true);
-  f.querySelector(".code").style.maxHeight = "168px";
+  f.querySelector(".code").style.maxHeight = "160px";
   s2.append(f);
   r.append(s2);
-
   const s3 = el("div", "sect");
   s3.append(el("h4", null, "计时"));
-  s3.append(
-    el("dl", "kv", `<dt>排队</dt><dd class="mono">12ms</dd><dt>执行</dt><dd class="mono">688ms</dd><dt>token</dt><dd class="mono">1,204</dd>`)
-  );
+  s3.append(el("dl", "kv", `<dt>排队</dt><dd class="mono">12ms</dd><dt>执行</dt><dd class="mono">688ms</dd><dt>token</dt><dd class="mono">1,204</dd>`));
   r.append(s3);
-
   const s4 = el("div", "sect");
   s4.append(el("h4", null, "会话"));
-  s4.append(
-    el(
-      "dl",
-      "kv",
-      `<dt>模式</dt><dd>${SESSION.preset}</dd>` +
-        `<dt>访问</dt><dd>${scene === "approval" ? "workspace-write" : SESSION.accessLabel}</dd>` +
-        `<dt>profile</dt><dd class="mono">studio</dd>` +
-        `<dt>桥</dt><dd class="mono">127.0.0.1:43180</dd>`
-    )
-  );
+  s4.append(el("dl", "kv", `<dt>模式</dt><dd>${SESSION.preset}</dd><dt>访问</dt><dd>${SESSION.accessLabel}</dd><dt>profile</dt><dd class="mono">studio</dd><dt>桥</dt><dd class="mono">127.0.0.1:43180</dd>`));
   r.append(s4);
   return r;
 }
 
-function benchRail(scene) {
+function benchRail() {
   const b = el("aside", "bench");
   const edit = NODES[3];
   const term = NODES[4];
@@ -360,7 +325,7 @@ function benchRail(scene) {
   const bot = el("div", "bench-t");
   bot.append(termFrame(term, false));
   const t = bot.querySelector(".term");
-  term.out.forEach((line) => t.append(el("div", null, `<span class="dim">${esc(line)}</span>`)));
+  term.out.forEach((l) => t.append(el("div", null, `<span class="dim">${esc(l)}</span>`)));
   b.append(bot);
   return b;
 }
@@ -370,7 +335,7 @@ function ledgerRail() {
   r.append(el("div", "rail-h", `<b>记录</b><em>#132</em>`));
   const s1 = el("div", "sect");
   s1.append(el("h4", null, "tool/call"));
-  s1.append(el("dl", "kv", `<dt>tool</dt><dd class="mono">bash</dd><dt>轮/步</dt><dd class="mono">3 / 2</dd><dt>surface</dt><dd class="mono">否</dd>`));
+  s1.append(el("dl", "kv", `<dt>tool</dt><dd class="mono">bash</dd><dt>轮 / 步</dt><dd class="mono">3 / 2</dd><dt>surface</dt><dd class="mono">否</dd>`));
   r.append(s1);
   const s2 = el("div", "sect");
   s2.append(el("h4", null, "输入"));
@@ -381,53 +346,44 @@ function ledgerRail() {
   s3.append(el("dl", "kv", `<dt>开始</dt><dd class="mono">5.40s</dd><dt>时长</dt><dd class="mono">4.21s</dd><dt>等审批</dt><dd class="mono">2.40s</dd>`));
   r.append(s3);
   const s4 = el("div", "sect");
-  s4.append(el("h4", null, "本轮统计"));
-  s4.append(
-    el("dl", "kv", `<dt>轮 · 步</dt><dd class="mono">3 · 7</dd><dt>LLM</dt><dd class="mono">${SESSION.stats.llm}</dd><dt>工具</dt><dd class="mono">${SESSION.stats.tools}</dd><dt>缓存命中</dt><dd class="mono">${SESSION.stats.cache}%</dd>`)
-  );
+  s4.append(el("h4", null, "本轮"));
+  s4.append(el("dl", "kv", `<dt>轮 · 步</dt><dd class="mono">3 · 7</dd><dt>LLM</dt><dd class="mono">${SESSION.stats.llm}</dd><dt>工具</dt><dd class="mono">${SESSION.stats.tools}</dd><dt>缓存</dt><dd class="mono">${SESSION.stats.cache}%</dd>`));
   r.append(s4);
   return r;
 }
 
 /* ————— composer ————— */
 
-function composerStack(variant, scene) {
+function composerStack(skin, scene) {
   const dock = el("div", "dock");
-
   const st = SESSION.stats;
   dock.append(
     el(
       "div",
       "strip",
-      `<span>${st.turns} 轮 · ${st.steps} 步</span><span class="sep">·</span><span>LLM ${st.llm}</span>` +
-        `<span class="sep">·</span><span>工具 ${st.tools}</span><span class="sep">·</span><span>首 token ${st.ttft}</span>` +
-        `<span class="sep">·</span><span>${st.tps} tok/s</span><span class="sep">·</span><span>缓存 ${st.cache}%</span>`
+      `<span>${st.turns} 轮 · ${st.steps} 步</span><span class="sep">·</span><span>LLM ${st.llm}</span><span class="sep">·</span>` +
+        `<span>工具 ${st.tools}</span><span class="sep">·</span><span>首 token ${st.ttft}</span><span class="sep">·</span>` +
+        `<span>${st.tps} tok/s</span><span class="sep">·</span><span>缓存 ${st.cache}%</span>`
     )
   );
-
   const todos = el("div", "todos");
   todos.append(el("span", "tk", "任务"));
-  TODOS.forEach((t) => {
-    todos.append(el("span", `todo ${t.done ? "done" : ""} ${t.active ? "now" : ""}`, `<b></b>${t.text}`));
-  });
+  TODOS.forEach((t) => todos.append(el("span", `todo ${t.done ? "done" : ""} ${t.active ? "now" : ""}`, `<b></b>${t.text}`)));
   dock.append(todos);
 
   const wrap = el("div", "cwrap");
-
   if (scene === "approval") {
     const ap = NODES.find((n) => n.kind === "approval");
     const panel = el("div", "approve");
     panel.innerHTML =
       `<div class="ap-top"><span class="ap-k">等待审批</span><span class="ap-r">${esc(ap.reason)}</span></div>` +
-      `<div class="ap-cmd">${esc(ap.command)}</div>` +
-      `<div class="ap-note">${esc(ap.note)}</div>`;
+      `<div class="ap-cmd">${esc(ap.command)}</div><div class="ap-note">${esc(ap.note)}</div>`;
     const btns = el("div", "ap-btns");
     btns.append(el("button", "btn btn-primary", "允许一次"), el("button", "btn", "拒绝"));
-    if (variant !== "web") {
-      // 官方 web 只有 allow-once / reject，没有持久授权。桌面补这一格。
-      const grant = el("label", "ap-grant");
-      grant.innerHTML = `<input type="checkbox" />本会话内记住 bash`;
-      btns.append(grant);
+    if (skin !== "web") {
+      const g = el("label", "ap-grant");
+      g.innerHTML = `<input type="checkbox" />本会话内记住 bash`;
+      btns.append(g);
     }
     panel.append(btns);
     wrap.append(panel);
@@ -436,33 +392,31 @@ function composerStack(variant, scene) {
   }
 
   const c = el("div", "composer");
-  c.innerHTML =
-    `<div class="crow1"><button type="button" class="plus">+</button>` +
-    `<textarea rows="1" placeholder="给智能体写点什么，或按 / 唤起命令" aria-label="输入"></textarea></div>`;
-  const row2 = el("div", "crow2");
+  c.innerHTML = `<div class="crow1"><button class="plus">+</button><textarea rows="1" placeholder="给智能体写点什么，或按 / 唤起命令" aria-label="输入"></textarea></div>`;
   const pct = Math.round((SESSION.context.used / SESSION.context.capacity) * 100);
-  // 上下文环和发送键钉住右边；窄栏时先裁左边的 chip，不能裁发送。
-  row2.innerHTML =
-    `<span class="cchips">` +
-    `<button type="button" class="chip">访问 · ${SESSION.accessLabel}</button>` +
-    `<button type="button" class="chip">计划 · 关</button>` +
-    `<button type="button" class="chip">${SESSION.model} · ${SESSION.effort}</button>` +
-    `</span>` +
-    `<span class="ringwrap"><span class="ring" style="background:conic-gradient(var(--field) 0 ${pct}%, var(--line) ${pct}% 100%)"></span>${pct}%</span>` +
-    `<button type="button" class="send">↑</button>`;
-  c.append(row2);
-  wrap.append(c);
-  wrap.append(el("div", "slash"));
+  c.append(
+    el(
+      "div",
+      "crow2",
+      `<span class="cchips"><button class="chip">访问 · ${SESSION.accessLabel}</button><button class="chip">计划 · 关</button>` +
+        `<button class="chip">${SESSION.model} · ${SESSION.effort}</button></span>` +
+        `<span class="ringwrap"><span class="ring" style="background:conic-gradient(var(--field) 0 ${pct}%, var(--line2) ${pct}% 100%)"></span>${pct}%</span>` +
+        `<button class="send">↑</button>`
+    )
+  );
+  wrap.append(c, el("div", "slash"));
   dock.append(wrap);
   return dock;
 }
 
 /* ————— 组装 ————— */
 
-function buildApp(variant, scene, look) {
+function buildApp(skin, struct, scene, mode) {
   const app = el("div", "app");
-  app.dataset.v = variant;
+  app.dataset.k = skin;
+  app.dataset.s = struct;
   app.dataset.scene = scene;
+  app.dataset.m = mode;
 
   const tbar = el("header", "tbar");
   tbar.innerHTML = `<div class="lights"><i></i><i></i><i></i></div><span class="wm">dsh-studio</span>`;
@@ -477,98 +431,82 @@ function buildApp(variant, scene, look) {
   const body = el("div", "body3");
   body.append(sidebar(scene));
 
-  const wantsTrajectory = scene === "trajectory" || variant === "ledger";
-
+  const asLedger = scene === "trajectory" || struct === "ledger";
   if (scene === "hero") {
     const center = el("div", "center");
     const hero = el("div", "hero");
-    hero.innerHTML =
-      `<span class="hero-badge">Preview</span>` +
-      `<h2>探索未至之境</h2>` +
-      `<p class="lede">选一个工作区就能开始。会话跟着文件夹走。</p>`;
-    const pick = el("button", "hero-pick", `<b>选择工作区</b><span>原生对话框 · 最近用过 4 个</span>`);
-    hero.append(pick);
-    center.append(hero);
-    center.append(composerStack(variant, scene));
+    hero.innerHTML = `<span class="hero-badge">Preview</span><h2>探索未至之境</h2><p class="lede">选一个工作区就能开始。会话跟着文件夹走。</p>`;
+    hero.append(el("button", "hero-pick", `<b>选择工作区</b><span>原生对话框 · 最近用过 4 个</span>`));
+    center.append(hero, composerStack(skin, scene));
     body.append(center);
-  } else if (wantsTrajectory) {
+  } else if (asLedger) {
     const center = trajectory();
     const head = el("div", "chead");
     head.innerHTML = `<h1>${SESSION.title}</h1>`;
-    const tabs = el("div", "vtabs");
-    tabs.innerHTML = `<button>Chat</button><button class="on">Trajectory</button>`;
-    head.append(tabs);
+    head.append(el("div", "vtabs", `<button>Chat</button><button class="on">Trajectory</button>`));
     center.prepend(head);
-    center.append(composerStack(variant, scene));
+    center.append(composerStack(skin, scene));
     body.append(center);
   } else {
     const center = el("div", "center");
     const head = el("div", "chead");
     head.innerHTML = `<h1>${SESSION.title}</h1>`;
-    const tabs = el("div", "vtabs");
-    tabs.innerHTML = `<button class="on">Chat</button><button>Trajectory</button>`;
-    head.append(tabs, el("button", "btn btn-sm", "子智能体 2"), el("button", "btn btn-sm", "作业"));
-    center.append(head);
-    center.append(el("div", "flow"));
-    center.append(composerStack(variant, scene));
+    head.append(el("div", "vtabs", `<button class="on">Chat</button><button>Trajectory</button>`), el("button", "btn btn-sm", "子智能体 2"));
+    center.append(head, el("div", "flow"), composerStack(skin, scene));
     body.append(center);
   }
 
-  if (variant === "bench") body.append(benchRail(scene));
-  else if (variant === "ledger") body.append(ledgerRail());
-  else body.append(detailsRail(variant, scene));
-
+  if (struct === "bench") body.append(benchRail());
+  else if (struct === "ledger") body.append(ledgerRail());
+  else body.append(detailsRail(skin, scene));
   app.append(body);
 
   const sc = SCENES[scene];
-  const sbar = el("footer", "sbar");
-  sbar.innerHTML =
-    `<span class="dot ${sc.tone === "wait" ? "wait" : ""}"></span><span>${sc.status}</span>` +
-    `<span class="right"><span>${SESSION.preset}</span><span>3080 · 43180</span></span>`;
-  app.append(sbar);
+  app.append(
+    el(
+      "footer",
+      "sbar",
+      `<span class="dot ${sc.tone === "wait" ? "wait" : ""}"></span><span>${sc.status}</span>` +
+        `<span class="right"><span>${SESSION.preset}</span><span>3080 · 43180</span></span>`
+    )
+  );
   return app;
 }
 
-/* ————— 播放 ————— */
-
 async function play(app) {
   const token = {};
-  timers.set(app, token);
-  const alive = () => timers.get(app) === token && app.isConnected;
+  runs.set(app, token);
+  const alive = () => runs.get(app) === token && app.isConnected;
   const flow = app.querySelector(".flow");
-  if (!flow || app.dataset.scene === "hero") return;
-  if (app.querySelector(".led")) return;
+  if (!flow || app.dataset.scene === "hero" || app.querySelector(".led")) return;
   flow.replaceChildren();
 
-  const variant = app.dataset.v;
-  const stopAt = app.dataset.scene === "approval" ? NODES.findIndex((n) => n.kind === "approval") : NODES.length;
+  const struct = app.dataset.s;
+  const stop = app.dataset.scene === "approval" ? NODES.findIndex((n) => n.kind === "approval") : NODES.length;
 
-  for (let i = 0; i < stopAt; i += 1) {
+  for (let i = 0; i < stop; i += 1) {
     if (!alive()) return;
     const node = NODES[i];
-    const n = nodeEl(node, variant);
+    const n = nodeEl(node, struct);
     if (!n) continue;
     n.classList.add("enter");
     flow.append(n);
     flow.scrollTop = flow.scrollHeight;
-
     if (node.kind === "tool") {
       await wait(node.ms);
       if (!alive()) return;
-      if (node.render === "terminal" && variant !== "bench") {
+      if (node.render === "terminal" && struct !== "bench") {
         n.classList.add("open");
         await printTerm(n.querySelector(".tool-b"), node, alive);
       }
       n.classList.remove("run");
       n.classList.add("ok");
-      if (variant !== "bench" && node.render === "diff") n.classList.add("open");
+      if (struct !== "bench" && node.render === "diff") n.classList.add("open");
     } else {
-      await wait(360);
+      await wait(340);
     }
     flow.scrollTop = flow.scrollHeight;
   }
-
-  // 审批场景：最后那次 bash 停在运行中，输入栏已经被审批面板接管
   if (app.dataset.scene === "approval") {
     const last = flow.querySelector(".tool:last-of-type");
     if (last) {
@@ -578,7 +516,7 @@ async function play(app) {
   }
 }
 
-/* ————— / 菜单锚在光标 ————— */
+/* ————— / 菜单 ————— */
 
 function caretXY(ta) {
   const wrap = ta.closest(".cwrap");
@@ -605,11 +543,11 @@ function openSlash(app, atCaret) {
   const ta = app.querySelector("textarea");
   if (!menu || !ta) return;
   menu.replaceChildren();
-  SLASH.forEach((item, i) => {
+  SLASH.forEach((it, i) => {
     const b = el("button", i === 0 ? "on" : "");
-    b.innerHTML = `<span class="sn">${item.name}</span><span class="sh">${item.hint}</span><span class="sd">${item.desc}</span>`;
+    b.innerHTML = `<span class="sn">${it.name}</span><span class="sh">${it.hint}</span><span class="sd">${it.desc}</span>`;
     b.addEventListener("click", () => {
-      ta.value = `${item.name} `;
+      ta.value = `${it.name} `;
       menu.classList.remove("open");
       ta.focus();
     });
@@ -618,11 +556,11 @@ function openSlash(app, atCaret) {
   const wrap = app.querySelector(".cwrap");
   if (atCaret) {
     const p = caretXY(ta);
-    menu.style.left = `${Math.min(p.x, wrap.clientWidth - 332)}px`;
+    menu.style.left = `${Math.max(0, Math.min(p.x, wrap.clientWidth - 330))}px`;
     menu.style.bottom = `${wrap.clientHeight - p.y + 4}px`;
   } else {
-    menu.style.left = "14px";
-    menu.style.bottom = `${wrap.clientHeight - 4}px`;
+    menu.style.left = "13px";
+    menu.style.bottom = `${wrap.clientHeight - 6}px`;
   }
   menu.classList.add("open");
 }
@@ -632,7 +570,7 @@ function bind(app) {
   if (!ta) return;
   ta.addEventListener("input", () => {
     ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 96)}px`;
+    ta.style.height = `${Math.min(ta.scrollHeight, 92)}px`;
     if (ta.value.endsWith("/")) openSlash(app, true);
     else if (!ta.value.startsWith("/")) app.querySelector(".slash")?.classList.remove("open");
   });
@@ -658,8 +596,8 @@ function submit(app) {
   const flow = app.querySelector(".flow");
   if (flow && !app.querySelector(".led")) {
     const n = el("div", "node n-user enter");
-    n.innerHTML = `<div class="n-meta">你 · 排队</div><p></p>`;
-    n.querySelector("p").textContent = text;
+    n.innerHTML = `<div class="n-meta">你 · 排队</div>`;
+    n.append(el("p", null, text));
     flow.append(n);
     flow.scrollTop = flow.scrollHeight;
   }
@@ -669,72 +607,86 @@ function submit(app) {
 
 /* ————— 外壳 ————— */
 
-function mount(which) {
-  const app = buildApp(state[which], state.scene, state.look);
-  hosts[which].replaceChildren(app);
+function mount(w) {
+  const app = buildApp(state[w], state.s, state.scene, state.mode);
+  hosts[w].replaceChildren(app);
   bind(app);
   play(app);
-  const cap = document.querySelector(`[data-win="${which}"] figcaption b`);
-  if (cap) cap.textContent = byId(state[which]).zh;
+  const cap = document.querySelector(`[data-win="${w}"] figcaption b`);
+  if (cap) cap.textContent = `${skinById(state[w]).zh} · ${STRUCTS.find((s) => s.id === state.s).zh}`;
 }
-
-function mountAll() {
+const mountAll = () => {
   mount("a");
   if (state.cmp) mount("b");
-}
+};
 
-function renderCards() {
+function renderSkins() {
   const side = document.querySelector(".pg-side");
-  side.querySelectorAll(".vcard").forEach((n) => n.remove());
-  VARIANTS.forEach((v, i) => {
-    const c = el("button", "vcard");
-    c.dataset.v = v.id;
-    c.innerHTML = `<span class="vk"><b>${v.zh}</b><em>${i + 1}</em></span><p>${v.tag} · ${v.name}</p>`;
-    c.addEventListener("click", () => pick(v.id));
+  side.querySelectorAll(".skin").forEach((n) => n.remove());
+  SKINS.forEach((s, i) => {
+    const c = el("button", "skin");
+    c.dataset.k = s.id;
+    c.innerHTML =
+      `<span class="sk-h"><span class="sw">${s.sw.map((h) => `<i style="background:${h}"></i>`).join("")}</span>` +
+      `<b>${s.zh}</b><em>${i + 1}</em></span><p>${s.blurb}</p>`;
+    c.addEventListener("click", () => pickSkin(s.id));
     side.append(c);
   });
-  syncCards();
+  syncSkins();
 }
+const syncSkins = () =>
+  document.querySelectorAll(".skin").forEach((c) => c.classList.toggle("on", c.dataset.k === state[state.focus]));
 
-function syncCards() {
-  const cur = state[state.focus];
-  document.querySelectorAll(".vcard").forEach((c) => c.classList.toggle("on", c.dataset.v === cur));
+function renderStructs() {
+  const box = document.getElementById("structs");
+  box.replaceChildren();
+  STRUCTS.forEach((s) => {
+    const b = el("button", s.id === state.s ? "on" : "", s.zh);
+    b.addEventListener("click", () => setStruct(s.id));
+    box.append(b);
+  });
 }
 
 function renderNotes() {
-  const v = byId(state[state.focus]);
+  const s = skinById(state[state.focus]);
+  const st = STRUCTS.find((x) => x.id === state.s);
   document.querySelector(".pg-notes").innerHTML =
-    `<p class="eyebrow">${v.tag}</p><h3>${v.zh}</h3><p class="sub">${v.name}</p>` +
-    `<p>${v.thesis}</p><dl>` +
-    `<dt>比官方 web 多了什么</dt><dd>${v.edge}</dd>` +
-    `<dt>代价</dt><dd>${v.cost}</dd>` +
-    `<dt>什么时候选它</dt><dd>${v.pick}</dd></dl>`;
+    `<p class="eb">皮肤</p><h3>${s.zh}</h3><p class="sub">${s.en}</p><p>${s.thesis}</p>` +
+    `<dl><dt>为什么适合 agent</dt><dd>${s.fit}</dd><dt>代价</dt><dd>${s.risk}</dd>` +
+    `<dt>当前结构 · ${st.zh}</dt><dd>${st.note}</dd></dl>`;
 }
 
-function pick(id) {
+function pickSkin(id) {
   state[state.focus] = id;
   mount(state.focus);
-  syncCards();
+  syncSkins();
   renderNotes();
   hash();
 }
-
-function setScene(scene) {
-  state.scene = scene;
-  document.querySelectorAll("[data-scene]").forEach((b) => b.classList.toggle("on", b.dataset.scene === scene));
+function setStruct(id) {
+  state.s = id;
+  renderStructs();
+  mountAll();
+  renderNotes();
+  hash();
+}
+function setScene(sc) {
+  state.scene = sc;
+  document.querySelectorAll("#scenes button").forEach((b) => b.classList.toggle("on", b.dataset.scene === sc));
   mountAll();
   hash();
 }
-
-function setLook(look) {
-  state.look = look;
-  document.body.dataset.look = look;
-  document.querySelectorAll("[data-look]").forEach((b) => {
-    if (b.tagName === "BUTTON") b.classList.toggle("on", b.dataset.look === look);
-  });
+function setMode(m) {
+  state.mode = m;
+  document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+  mountAll();
   hash();
 }
-
+function setPg(v) {
+  state.pg = v;
+  document.body.dataset.pg = v;
+  hash();
+}
 function toggleCmp() {
   state.cmp = !state.cmp;
   if (!state.cmp) {
@@ -745,47 +697,46 @@ function toggleCmp() {
   document.querySelector(".pg-stage").dataset.cmp = String(state.cmp);
   document.querySelector('[data-win="b"]').hidden = !state.cmp;
   if (state.cmp) mount("b");
-  syncCards();
+  syncSkins();
   renderNotes();
   hash();
 }
 
 function hash() {
-  const p = new URLSearchParams({ v: state.a, scene: state.scene, look: state.look });
+  const p = new URLSearchParams({ k: state.a, s: state.s, scene: state.scene, m: state.mode });
+  if (state.pg === "dark") p.set("pg", "dark");
   if (state.cmp) {
     p.set("cmp", "1");
     p.set("b", state.b);
   }
   history.replaceState(null, "", `#${p}`);
 }
-
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
-  const ids = VARIANTS.map((v) => v.id);
-  if (ids.includes(p.get("v"))) state.a = p.get("v");
+  const ids = SKINS.map((s) => s.id);
+  if (ids.includes(p.get("k"))) state.a = p.get("k");
   if (ids.includes(p.get("b"))) state.b = p.get("b");
+  if (STRUCTS.some((s) => s.id === p.get("s"))) state.s = p.get("s");
   if (SCENES[p.get("scene")]) state.scene = p.get("scene");
-  if (["paper", "field"].includes(p.get("look"))) state.look = p.get("look");
+  if (["light", "dark"].includes(p.get("m"))) state.mode = p.get("m");
+  if (p.get("pg") === "dark") state.pg = "dark";
   if (p.get("cmp") === "1") state.cmp = true;
 }
 
-document.querySelectorAll(".tabs2 [data-scene]").forEach((b) => b.addEventListener("click", () => setScene(b.dataset.scene)));
-document.querySelectorAll(".seg [data-look]").forEach((b) => b.addEventListener("click", () => setLook(b.dataset.look)));
+document.querySelectorAll("#scenes button").forEach((b) => b.addEventListener("click", () => setScene(b.dataset.scene)));
+document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
 document.querySelector('[data-act="cmp"]').addEventListener("click", toggleCmp);
-document.querySelector('[data-act="replay"]').addEventListener("click", () => mountAll());
+document.querySelector('[data-act="replay"]').addEventListener("click", mountAll);
+document.querySelector('[data-act="pg"]').addEventListener("click", () => setPg(state.pg === "light" ? "dark" : "light"));
 document.querySelectorAll(".frame").forEach((f) =>
   f.addEventListener("mousedown", () => {
     if (!state.cmp) return;
     state.focus = f.dataset.win;
     document.querySelectorAll(".frame").forEach((n) => n.classList.toggle("on", n === f));
-    syncCards();
+    syncSkins();
     renderNotes();
   })
 );
-
-document.getElementById("accs").innerHTML = VARIANTS.map(
-  (v, i) => `<span class="acc">[<i>${i + 1}</i>]${v.zh}</span>`
-).join(" ");
 
 window.addEventListener("keydown", (e) => {
   if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
@@ -793,12 +744,13 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   const n = Number(e.key);
-  if (n >= 1 && n <= VARIANTS.length) pick(VARIANTS[n - 1].id);
+  if (n >= 1 && n <= SKINS.length) pickSkin(SKINS[n - 1].id);
   const k = e.key.toLowerCase();
   const scenes = { q: "session", w: "approval", e: "trajectory", r: "hero" };
   if (scenes[k]) setScene(scenes[k]);
+  if (k === "s") setStruct(STRUCTS[(STRUCTS.findIndex((x) => x.id === state.s) + 1) % STRUCTS.length].id);
   if (k === "c") toggleCmp();
-  if (k === "d") setLook(state.look === "paper" ? "field" : "paper");
+  if (k === "d") setMode(state.mode === "light" ? "dark" : "light");
   if (e.code === "Space") {
     e.preventDefault();
     mountAll();
@@ -815,12 +767,14 @@ window.addEventListener("keydown", (e) => {
 });
 
 readHash();
-setLook(state.look);
-document.querySelectorAll("[data-scene]").forEach((b) => b.classList.toggle("on", b.dataset.scene === state.scene));
+document.body.dataset.pg = state.pg;
+document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === state.mode));
+document.querySelectorAll("#scenes button").forEach((b) => b.classList.toggle("on", b.dataset.scene === state.scene));
 document.querySelector('[data-act="cmp"]').setAttribute("aria-pressed", String(state.cmp));
 document.querySelector(".pg-stage").dataset.cmp = String(state.cmp);
 document.querySelector('[data-win="b"]').hidden = !state.cmp;
-renderCards();
+renderStructs();
+renderSkins();
 mountAll();
 renderNotes();
 hash();
