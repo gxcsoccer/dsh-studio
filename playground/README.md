@@ -1,45 +1,65 @@
-# DSH Studio · Design Playground
+# DSH Studio · 设计现场
 
-对齐的是 [Notion 开发者平台页](https://www.notion.com/zh-cn/product/dev) 的纸面气质，**不是 Raycast 那套玻璃 HUD**。
+对齐 [Notion 开发者平台页](https://www.notion.com/zh-cn/product/dev) 的纸面语法：暖纸底、编辑性排版、色块当标点、代码窗是主角。不做命令面板 HUD。
 
 ```sh
 open playground/index.html
 ```
 
-或：
+或 `python3 -m http.server 4173 --directory playground`。
 
-```sh
-python3 -m http.server 4173 --directory playground
-```
+## 这次比的是结构，不是配色
 
-然后打开 `http://127.0.0.1:4173`。
+四种结构渲染**同一份 agent transcript**——同一次「把侧栏做成工作区书签」：思考、读文件、改 diff、跑 `swift build`、要一次钥匙串批准、回话。所以差异全在版式和节奏上。
 
-## 五套，同一家族里做选择
+| 键 | 结构 | 工具调用去哪 | 选它的理由 |
+| --- | --- | --- | --- |
+| 1 | **手稿** Manuscript | 正文压成一行，详情去页边批注 | 会话本身是产物，要能读、能引用 |
+| 2 | **双联** Diptych | 全部到右边的色块舞台上演 | 最像那一页的「文案 + 活的代码窗」 |
+| 3 | **块** Blocks | 正文里的可折叠 callout | 每天八小时驻留，翻旧会话 |
+| 4 | **当前** Current | 挤在中栏 | 只用来量差距 |
 
-| 键 | 方向 | 一句话 |
-| --- | --- | --- |
-| 1 | **当前** | 现有 Studio Dark，只作对照 |
-| 2 | **纸面 Paper** | 最像那一页：暖纸、大标题、动词药丸、杏色代码卡 |
-| 3 | **块 Blocks** | Notion 工作区：句柄、/ 插入、callout、页面属性 |
-| 4 | **舞台 Stage** | /product/dev 的左右分栏：左文书，右色块里演工具 |
-| 5 | **暮色 Dusk** | 同一套纸面语法的夜间暖炭，不是 OLED 玻璃 |
+**日 / 暮**是正交的开关，不是第五种风格：同一套语法换光线。
 
-没有命令面板悬浮舱、没有网格蓝图、没有赛博描边。快捷检索做成纸上的插入，不是 HUD。
+### 手稿
 
-预览（会话场景）：
+没有左侧栏——工作区是顶部的纸书签。标题 56px，lede 用衬线，工具痕迹退到页边当边注。
 
-| 纸面 | 块 | 舞台 |
-| --- | --- | --- |
-| ![Paper](./previews/paper-session.png) | ![Blocks](./previews/blocks-session.png) | ![Stage](./previews/stage-session.png) |
+![手稿](./previews/manuscript-session.png)
+
+### 双联
+
+左边永远是叙述，右边是整块色的舞台。色随活动走：读文件杏色、改代码天蓝、跑命令午夜蓝、要审批转珊瑚——**色块就是状态**。批准的时候代码还留在台上，因为你要看着它决定。
+
+![双联](./previews/diptych-session.png)
+
+### 块
+
+真正的块编辑器：悬停出句柄，`/` 菜单锚在光标的实际像素位置，工具是能折叠的 callout，检查器是页面属性那一套小标签。
+
+![块](./previews/blocks-session.png)
+
+### 暮
+
+![双联 · 暮色](./previews/diptych-dusk.png)
 
 ## 快捷键
 
 | 键 | 动作 |
 | --- | --- |
-| `1`–`5` | 切换风格 |
-| `Q` `W` `E` `R` | 会话 / 首次运行 / 空工作区 / 失败 |
-| `/` 或 `⌘K` | 插入 / 检索 |
-| `Esc` | 关闭 |
-| `C` | 对比两套 |
+| `1`–`4` | 换结构 |
+| `Q W E R` | 会话 / 首次运行 / 空工作区 / 失败 |
+| `D` | 日 ↔ 暮 |
+| `C` | 左右对比两种结构 |
+| `Space` | 重播这一回合 |
+| `/` | 在输入栏里从光标处插入 |
 
-对比时先点窗口 A 或 B，再点左侧风格卡。
+对比时先点窗口 A 或 B，再点左边的结构卡。地址栏 hash 会记住当前组合，可以直接把链接发出来。
+
+## 文件
+
+| 文件 | 内容 |
+| --- | --- |
+| `transcript.js` | agent 回合数据、四个场景的文案、`/` 菜单项 |
+| `playground.js` | 四种结构的渲染、播放器、光标锚定 |
+| `playground.css` | 纸面 token、日/暮、代码窗与 diff |
