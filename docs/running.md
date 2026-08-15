@@ -26,6 +26,18 @@ node "$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js" --profile stu
 
 里面应该有 `studio-runtime` / `webserver` / `frontend-static` 这些行，**不应该**有任何 `dsh-web-app`。
 
+## 改浏览器侧的插件
+
+`packages/bundle` 是双面包：`src/index.js` 是 host 半边，`src/client.jsx` 是浏览器半边。改完要重新构建产物，运行时才会服务新的 bundle：
+
+```sh
+cd packages/bundle && npm run build      # 或 npm run watch
+```
+
+然后重启运行时（应用里 ⌘⇧R，或重开应用）。`__DSH_BOOT__` 里的 `rev` 会变。
+
+调 UI 时不必每次都开应用——surface 就是个普通网页，浏览器直接开 <http://127.0.0.1:3099> 即可，有 devtools 好用得多。
+
 ## 跑桌面端
 
 ```sh

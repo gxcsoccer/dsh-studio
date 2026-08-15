@@ -261,6 +261,23 @@ mux 流开流时会重放每个已附着会话的**未决**审批/提问帧，�
 - `SlotMap` 靠 TypeScript declaration merging 扩展，第三方声明自己的 slot 名。
 - renderer 是可安装的 seam（`SlotRegistry.install`），官方实现是 `dsh-client-web-react.createSlotRenderer()`。**seam 可换，但官方 UI 组件本身是 React**，所以保留官方会话渲染 ≈ 保留 React 绑定层。
 
+#### 写一个第三方 client 插件（已跑通）
+
+一个包可以同时是 bundle 和 client 插件——`dsh-client-connection` 就是这么做的，我们的 `dsh-studio` 也是，这样不用再链接第二个包。
+
+产物格式不是我们能选的：`dsh-client-modules` 服务 `/plugins/<id>/client.js`，shell 的模块表要求每个 bundle 自己调 `window.__ModuleLoader__.load({ id, factory })` 注册，`factory` 收到一个能解析共享运行时的 `require`。`packages/bundle/scripts/build-client.mjs` 用 esbuild 产 CJS 再套这层壳。
+
+**哪些包留成 external 是关键**：`react` / `react/jsx-runtime` / 全部 `@deepseek-ai/*` 必须走注入的 `require`。自带一份 React 就是第二个模块实例——[同一个陷阱](#打包包只能存在一份)在浏览器侧的第三次现身，表现为 hooks 报错或组件对不上。
+
+**两个 `inject` 意思完全不同，混了代价不小：**
+
+| 位置 | 内容 | 例 |
+| --- | --- | --- |
+| `package.json` 的 `dsh.client.inject` | **包名**，shell 解析的加载边 | `@deepseek-ai/dsh-client-ui-layout` |
+| 模块导出的 `inject` | **Cordis 服务名**，fiber 等待的对象 | `slots`、`layout`、`connection` |
+
+在后者里填包名，插件会永远停在 PENDING。好在失败是响亮的——shell 直接拒绝启动并列出它在等哪些服务，所以这个错三十秒就能定位。
+
 ### 2.8 插件生命周期
 
 `apply(ctx, config)` 是我们写入运行时的唯一入口。`inject` 列硬依赖服务名，Cordis 会把插件停在 PENDING 直到服务出现——**只 inject 真正会调用的服务**，占位式 inject 是噪音。`Config` 既是 TS 类型也是运行时 schema（`@deepseek-ai/schemastery`，或任何 Standard Schema 校验器），校验发生在 `apply` 之前。
