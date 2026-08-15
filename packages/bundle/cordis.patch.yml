@@ -1,0 +1,335 @@
+# The dsh-studio bundle patch: our own surface over the dsh-base layer.
+#
+# This is deliberately NOT `dsh-web-app`. We stack the same parts, composed by
+# our own judgement — that is what "everything is a plugin" means when you take
+# it literally. Every row here is an official published plugin; the only thing
+# we author is which rows exist and how they are configured.
+#
+# A patch replaces the targeted row's whole `config`, so each row below
+# restates every key it owns.
+#
+# Sections, in the order they will die:
+#   1. host plane   — permanent
+#   2. browser plane — goes away when the last official ui-* row is replaced
+#   3. agent plane   — permanent, but its contents move behind presets
+
+# ── overrides on rows the base already owns ─────────────────────────────────
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+# Shared HMR stays off, matching the official web surface: its reload lifecycle
+# is untested against a long-lived desktop host.
+- id: hmr
+  disabled: true
+
+# Full-text session search is opt-in. `openAt: never` defers the node:sqlite
+# import until the first search actually happens.
+- id: session-query-sqlite
+  config:
+    path: ':memory:'
+    openAt: never
+
+- id: tools
+  config:
+    mode: !!js process.env.DSH_TOOLS_MODE
+
+# ── 1. host plane ───────────────────────────────────────────────────────────
+#
+# Capabilities dsh-base deliberately leaves to the surface. Without these the
+# gateway answers `service-unavailable` for half its domains.
+
+- insert:
+    - id: code-runtime
+      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+
+    - id: storage
+      name: '@deepseek-ai/dsh-storage'
+
+    - id: storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('storages')
+
+    - id: storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+
+    - id: message-feedback
+      name: '@deepseek-ai/dsh-message-feedback'
+      config:
+        maxNoteBytes: 8192
+
+    - id: session-log-download
+      name: '@deepseek-ai/dsh-session-log-export'
+
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+
+    - id: session-projection-cache
+      name: '@deepseek-ai/dsh-session-projection-cache'
+      config:
+        writeEveryEvents: 200
+        writeIntervalMs: 5000
+
+    - id: session-stats
+      name: '@deepseek-ai/dsh-session-stats'
+
+    # Dual-face seam: `-auto` samples bind host, SSH, and platform once at boot
+    # and mounts the native chooser or the in-browser one. On a loopback macOS
+    # host this resolves to the native OS picker, which is why the desktop does
+    # not need its own directory dialog.
+    - id: directory-picker
+      name: '@deepseek-ai/dsh-host-directory-picker-auto'
+
+    - id: plugin-inventory
+      name: '@deepseek-ai/dsh-host-plugin-inventory'
+
+    # The transport-agnostic gateway every client shape shares — including the
+    # native one. This row is the whole reason a Swift client is possible
+    # without forking anything.
+    - id: api-gateway
+      name: '@deepseek-ai/dsh-host-apiproxy'
+
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    # Our own glue: the values the patch cannot compute for itself.
+    - id: studio-runtime
+      name: 'dsh-studio'
+
+# ── 2. browser plane ────────────────────────────────────────────────────────
+#
+# Everything from here to the end of this insert is scaffolding for rendering
+# the surface in a WebView, and it all hangs off `ctx.webServer` — client
+# delivery, the boot manifest, and the /api transport are all registered on it.
+# That is why a loopback TCP port exists at all, and why this whole section
+# disappears the day the last official ui-* row is replaced by a native slot.
+
+- insert:
+    # Bind is a decision, not a discovery: the port comes from our own config.
+    - id: webserver
+      name: '@deepseek-ai/dsh-host-webserver'
+      inject: [studioRuntime]
+      config:
+        host: '127.0.0.1'
+        port: !!js ctx.studioRuntime.config.port
+
+    # Serves the official SPA dist through the webserver's fallback seat. The
+    # path is workspace knowledge, so it arrives from our runtime service.
+    - id: frontend-static
+      name: '@deepseek-ai/dsh-host-frontend-static'
+      inject: [studioRuntime]
+      config:
+        distIndex: !!js ctx.studioRuntime.distIndex
+
+    # Dual-face: the node half scans the loader for packages declaring
+    # `dsh.client`, composes window.__DSH_BOOT__, and serves
+    # /plugins/<id>/client.js. Every ui-* row below is discovered this way.
+    - id: modules
+      name: '@deepseek-ai/dsh-client-modules'
+
+    # Both ends of the web transport. `trustedHosts: []` is the strict setting:
+    # an empty trust table means loopback only, which is also what the gateway's
+    # privileged methods require.
+    - id: connection
+      name: '@deepseek-ai/dsh-client-connection'
+      config:
+        trustedHosts: []
+
+    - id: api-remotes
+      name: '@deepseek-ai/dsh-api-remotes'
+
+    - id: client-runtime
+      name: '@deepseek-ai/dsh-client-runtime'
+
+    - id: cordis-client-runner
+      name: '@deepseek-ai/dsh-cordis-client-runner'
+
+    - id: ui-theme
+      name: '@deepseek-ai/dsh-client-ui-theme'
+
+    - id: locale
+      name: '@deepseek-ai/dsh-client-locale'
+
+    # Claims `root` and declares the `conversation` / `details` / `shell.overlay`
+    # seats. Replacing THIS row with our own is the first step of native chrome:
+    # a replacement must declare the same seats and provide a compatible
+    # `ctx.layout`, or ui-conversation and the shell both stall in PENDING.
+    - id: ui-layout
+      name: '@deepseek-ai/dsh-client-ui-layout'
+
+    - id: ui-sidebar
+      name: '@deepseek-ai/dsh-client-ui-sidebar'
+
+    - id: ui-settings
+      name: '@deepseek-ai/dsh-client-ui-settings'
+
+    - id: ui-settings-general
+      name: '@deepseek-ai/dsh-client-ui-settings-general'
+
+    - id: ui-settings-models
+      name: '@deepseek-ai/dsh-client-ui-settings-models'
+
+    - id: ui-settings-plugin-inventory
+      name: '@deepseek-ai/dsh-client-ui-settings-plugin-inventory'
+
+    - id: ui-settings-plugins
+      name: '@deepseek-ai/dsh-client-ui-settings-plugins'
+
+    - id: ui-conversation
+      name: '@deepseek-ai/dsh-client-ui-conversation'
+
+    - id: ui-tool
+      name: '@deepseek-ai/dsh-client-ui-tool'
+
+    - id: ui-cordis
+      name: '@deepseek-ai/dsh-client-ui-cordis'
+
+    - id: ui-workflow-run
+      name: '@deepseek-ai/dsh-client-ui-workflow-run'
+
+    - id: ui-deliverables
+      name: '@deepseek-ai/dsh-client-ui-deliverables'
+
+    - id: ui-workspace
+      name: '@deepseek-ai/dsh-client-ui-workspace'
+
+    - id: ui-input-trigger
+      name: '@deepseek-ai/dsh-client-ui-input-trigger'
+
+    - id: ui-commands
+      name: '@deepseek-ai/dsh-client-ui-commands'
+
+    - id: ui-skill
+      name: '@deepseek-ai/dsh-client-ui-skill'
+
+    - id: ui-subagent
+      name: '@deepseek-ai/dsh-client-ui-subagent'
+
+    - id: ui-jobs
+      name: '@deepseek-ai/dsh-client-ui-jobs'
+
+    - id: ui-goal
+      name: '@deepseek-ai/dsh-client-ui-goal'
+
+    - id: ui-message-feedback
+      name: '@deepseek-ai/dsh-client-ui-message-feedback'
+
+    - id: ui-model-selection
+      name: '@deepseek-ai/dsh-client-ui-model-selection'
+
+    - id: ui-permission
+      name: '@deepseek-ai/dsh-client-ui-permission-presets'
+
+    - id: ui-agent-preset
+      name: '@deepseek-ai/dsh-client-ui-agent-preset'
+
+    - id: ui-plan
+      name: '@deepseek-ai/dsh-client-ui-plan'
+
+    # The composer seat that answers `approval/requested` and
+    # `question/requested`. Without it a turn that needs permission simply never
+    # finishes — see docs/product.md.
+    - id: ui-user-questions
+      name: '@deepseek-ai/dsh-client-ui-user-questions'
+
+    - id: ui-trajectory
+      name: '@deepseek-ai/dsh-client-ui-trajectory'
+
+# ── 3. agent plane ──────────────────────────────────────────────────────────
+#
+# The base mounts one agent's tools process-wide, which is correct for the
+# single-session TUI and wrong for any multi-session surface: the second session
+# collides on the registry. So the per-agent rows move behind agent presets,
+# and each session mounts one.
+#
+# Disabled rather than deleted, deliberately: the base layer is shared, and a
+# row merely absent from an overlay reappears the day someone reorders the
+# composition.
+#
+# What stays on the host plane is not arbitrary. The criteria are upstream's:
+# a row that INJECTS a service belongs to the host (injection resolves before
+# any session exists), and a registry with a cross-session query surface belongs
+# to the host (a per-session copy would collide or starve the gateway).
+
+- id: tool-bash
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: tool-jobs
+  disabled: true
+
+- id: tool-fs
+  disabled: true
+
+- id: tool-fs-search
+  disabled: true
+
+- id: tool-str-replace-editor
+  disabled: true
+
+- id: skill-filesystem
+  disabled: true
+
+- id: tool-skill
+  disabled: true
+
+- id: tool-goal
+  disabled: true
+
+- id: plan-mode
+  disabled: true
+
+- id: compaction-basic
+  disabled: true
+
+- id: command-compact
+  disabled: true
+
+- id: tool-result-pruner
+  disabled: true
+
+- id: tool-subagent-control
+  disabled: true
+
+- id: tool-subagent-list-agents
+  disabled: true
+
+- id: tool-subagent
+  disabled: true
+
+- id: tool-subagent-fork
+  disabled: true
+
+- id: tool-subagent-report
+  disabled: true
+
+- id: workflow-worker-thread
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: tool-ralph
+  disabled: true
+
+- id: agent-instructions
+  disabled: true
+
+- id: tool-todo
+  disabled: true
+
+- id: tool-web
+  disabled: true
+
+- insert:
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      config:
+        default: standard
