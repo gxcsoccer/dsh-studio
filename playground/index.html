@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DSH Studio · 桌面设计现场</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./playground.css" />
+</head>
+<body data-pg="light">
+  <div class="pg">
+    <header class="pg-top">
+      <div class="pg-brand">
+        <b>dsh-studio</b>
+        <span>皮肤 × 结构 · 同一次会话</span>
+      </div>
+      <div class="pg-tools">
+        <div class="seg" id="structs" role="group" aria-label="结构"></div>
+        <div class="seg" role="group" aria-label="明暗">
+          <button type="button" data-mode="light" class="on">明</button>
+          <button type="button" data-mode="dark">暗</button>
+        </div>
+        <button type="button" class="tbtn" data-act="replay">重播</button>
+        <button type="button" class="tbtn" data-act="cmp" aria-pressed="false">对比</button>
+        <button type="button" class="tbtn" data-act="pg">◐</button>
+      </div>
+    </header>
+
+    <aside class="pg-side" aria-label="皮肤"><h2>皮肤</h2></aside>
+
+    <main class="pg-main">
+      <div class="pg-bar">
+        <div class="seg" id="scenes" role="group" aria-label="场景">
+          <button type="button" class="on" data-scene="session">会话</button>
+          <button type="button" data-scene="approval">审批</button>
+          <button type="button" data-scene="trajectory">轨迹</button>
+          <button type="button" data-scene="hero">新会话</button>
+        </div>
+        <p class="hint">1–6 皮肤 · S 结构 · Q W E R 场景 · D 明暗 · C 对比 · Space 重播 · / 命令</p>
+      </div>
+      <div class="pg-stage" data-cmp="false">
+        <figure class="frame on" data-win="a">
+          <figcaption>A<b></b></figcaption>
+          <div class="host" id="host-a"></div>
+        </figure>
+        <figure class="frame" data-win="b" hidden>
+          <figcaption>B<b></b></figcaption>
+          <div class="host" id="host-b"></div>
+        </figure>
+      </div>
+    </main>
+
+    <aside class="pg-notes" aria-live="polite"></aside>
+  </div>
+
+  <script src="./transcript.js"></script>
+  <script src="./playground.js"></script>
+</body>
+</html>
