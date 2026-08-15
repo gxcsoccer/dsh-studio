@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "DSHKit", targets: ["DSHKit"]),
         .library(name: "DSHHost", targets: ["DSHHost"]),
         .executable(name: "dsh-probe", targets: ["dsh-probe"]),
+        .executable(name: "DSH", targets: ["DSH"]),
     ],
     targets: [
         // The protocol layer: the Swift face of the official ApiProxy contract.
@@ -20,5 +21,7 @@ let package = Package(
         // the smoke test that stands in for the version negotiation the
         // gateway protocol does not have.
         .executableTarget(name: "dsh-probe", dependencies: ["DSHKit", "DSHHost"]),
+        // The desktop product.
+        .executableTarget(name: "DSH", dependencies: ["DSHKit", "DSHHost"]),
     ]
 )
