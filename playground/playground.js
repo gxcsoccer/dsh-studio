@@ -431,30 +431,36 @@ function buildApp(skin, struct, scene, mode) {
   const body = el("div", "body3");
   body.append(sidebar(scene));
 
+  // 中栏 = 一张浮起的画布 + 一层单独浮起的输入栏，不是一根到底的边框柱。
   const asLedger = scene === "trajectory" || struct === "ledger";
+  const center = el("div", "center");
+  const sheet = el("div", "sheet");
+
   if (scene === "hero") {
-    const center = el("div", "center");
     const hero = el("div", "hero");
     hero.innerHTML = `<span class="hero-badge">Preview</span><h2>探索未至之境</h2><p class="lede">选一个工作区就能开始。会话跟着文件夹走。</p>`;
     hero.append(el("button", "hero-pick", `<b>选择工作区</b><span>原生对话框 · 最近用过 4 个</span>`));
-    center.append(hero, composerStack(skin, scene));
-    body.append(center);
-  } else if (asLedger) {
-    const center = trajectory();
-    const head = el("div", "chead");
-    head.innerHTML = `<h1>${SESSION.title}</h1>`;
-    head.append(el("div", "vtabs", `<button>Chat</button><button class="on">Trajectory</button>`));
-    center.prepend(head);
-    center.append(composerStack(skin, scene));
-    body.append(center);
+    sheet.append(hero);
   } else {
-    const center = el("div", "center");
     const head = el("div", "chead");
     head.innerHTML = `<h1>${SESSION.title}</h1>`;
-    head.append(el("div", "vtabs", `<button class="on">Chat</button><button>Trajectory</button>`), el("button", "btn btn-sm", "子智能体 2"));
-    center.append(head, el("div", "flow"), composerStack(skin, scene));
-    body.append(center);
+    const tabs = el("div", "vtabs");
+    tabs.innerHTML = asLedger
+      ? `<button>Chat</button><button class="on">Trajectory</button>`
+      : `<button class="on">Chat</button><button>Trajectory</button>`;
+    head.append(tabs);
+    if (!asLedger) head.append(el("button", "btn btn-sm ghost", "子智能体 2"));
+    sheet.append(head);
+    if (asLedger) {
+      const t = trajectory();
+      while (t.firstChild) sheet.append(t.firstChild);
+    } else {
+      sheet.append(el("div", "flow"));
+    }
   }
+
+  center.append(sheet, composerStack(skin, scene));
+  body.append(center);
 
   if (struct === "bench") body.append(benchRail());
   else if (struct === "ledger") body.append(ledgerRail());
