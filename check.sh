@@ -7,12 +7,13 @@
 #
 #   1. codegen   — the contract's own schemas still map onto the method table
 #   2. build     — the generated types still satisfy every call site
-#   3. tests     — recorded real traffic still decodes into named branches
-#   4. probe     — a live host still behaves the way the types say (opt-in:
+#   3. bundle    — the browser half's logic, and that its artifact is current
+#   4. tests     — recorded real traffic still decodes into named branches
+#   5. probe     — a live host still behaves the way the types say (opt-in:
 #                  needs a running runtime, and spends real model tokens)
 #
-#   ./check.sh            # 1–3
-#   ./check.sh --live     # 1–4
+#   ./check.sh            # 1–4
+#   ./check.sh --live     # 1–5
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -26,6 +27,13 @@ if ! git diff --quiet -- app/Sources/DSHKit/Generated 2>/dev/null; then
   echo "注意：codegen 产物有改动，说明上游契约动过了 —— 记得连同代码一起提交"
 fi
 swift build --package-path app
+
+step "bundle（浏览器半边：判定逻辑 + 产物）"
+npm --prefix packages/bundle test --silent
+node packages/bundle/scripts/build-client.mjs
+if ! git diff --quiet -- packages/bundle/lib 2>/dev/null; then
+  echo "注意：client 产物有改动 —— 记得连同源码一起提交"
+fi
 
 step "test（录制的真实下行流）"
 swift test --package-path app

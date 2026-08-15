@@ -15,6 +15,8 @@
  */
 import { useSyncExternalStore } from 'react'
 
+import { createWedgedSessionCard } from './wedged-session.jsx'
+
 /**
  * Cordis **service** names, not package names.
  *
@@ -27,7 +29,7 @@ import { useSyncExternalStore } from 'react'
  * `layout` is required because it declares `shell.overlay`, and a slot cannot
  * be filled before it is declared.
  */
-export const inject = ['slots', 'layout', 'connection']
+export const inject = ['slots', 'layout', 'connection', 'sessions']
 
 export function apply(ctx) {
   const source = ctx.connection.hostDescription
@@ -59,6 +61,15 @@ export function apply(ctx) {
         RuntimeConnectionBanner,
       ),
     'studio: runtime connection banner',
+  )
+
+  // Sits with the composer because that is where the futile action is: a wedged
+  // session looks exactly like a working one until you type into it.
+  ctx.slots.inject('conversation.input.dock', () =>
+    ctx.slots.register(
+      { name: 'conversation.input.dock', id: 'studio-wedged-session', order: 10 },
+      createWedgedSessionCard(ctx),
+    ),
   )
 }
 

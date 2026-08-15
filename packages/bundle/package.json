@@ -14,7 +14,8 @@
   },
   "scripts": {
     "build": "node scripts/build-client.mjs",
-    "watch": "node scripts/build-client.mjs --watch"
+    "watch": "node scripts/build-client.mjs --watch",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dsh": {
     "bundle": {
