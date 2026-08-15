@@ -93,6 +93,6 @@ node tools/record-fixtures/record.mjs     # 需要一个跑着的运行时
 
 - **未签名。** 每次重建都是一个新身份，钥匙串会重新问。签名与 Keychain 凭据后端一起，排在后面的里程碑。
 - **端口钉死 3099。** 被别的东西占了会启动失败，暂时没有自动换端口。
-- **会话界面还是官方 client 插件行渲染的。** 那是[路线 C](../ARCHITECTURE.md#4-ui-策略路线-c) 的中间态：roster 是我们自己组的（没有 `dsh-web-app`），但 chrome 还没换成原生。原生化按 slot 逐个来。
+- **会话界面还是官方 client 插件行渲染的。** 那是[路线 C](../ARCHITECTURE.md#4-ui-策略路线-c) 的中间态：roster 是我们自己组的（没有 `dsh-web-app`），会话列表已经是原生侧栏，官方侧栏在原生窗口里不再占宽度（设置弹层仍挂在那棵树上）。⌘O / ⌘N / ⌘K / ⌘, / 点侧栏行走私有通道；命令面板的正文命中走网关 `session.search`。
 - **`provision` 依赖 pnpm 能连上 registry。** 见上面的 `--registry`。
 - **别手动往 profile 里 `dsh plugin add` 那些 roster 包。** dsh 安装大概率已经带了，装进去就是第二份模块实例。走 `provision.mjs`，它会判断该不该装并检查重复。

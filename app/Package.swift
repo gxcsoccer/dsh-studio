@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "DSHKit", targets: ["DSHKit"]),
         .library(name: "DSHHost", targets: ["DSHHost"]),
+        .library(name: "DSHSurface", targets: ["DSHSurface"]),
         .executable(name: "dsh-probe", targets: ["dsh-probe"]),
         .executable(name: "DSH", targets: ["DSH"]),
     ],
@@ -22,12 +23,17 @@ let package = Package(
         // gateway protocol does not have.
         .executableTarget(name: "dsh-probe", dependencies: ["DSHKit", "DSHHost"]),
         // The desktop product.
-        .executableTarget(name: "DSH", dependencies: ["DSHKit", "DSHHost"]),
+        .executableTarget(name: "DSH", dependencies: ["DSHKit", "DSHHost", "DSHSurface"]),
+        // Private chrome channel between the Swift host and our client plugin.
+        // Not the official contract — that stays in DSHKit — and not WebKit,
+        // so the envelope and the ready-queue can be tested without a view.
+        .target(name: "DSHSurface", dependencies: ["DSHKit"]),
 
         // Replays recorded downlink traffic through the real decoder. This is
         // the defense that catches upstream drift without a live host — see
         // ARCHITECTURE §6.
         .testTarget(name: "DSHKitTests", dependencies: ["DSHKit"]),
         .testTarget(name: "DSHHostTests", dependencies: ["DSHHost"]),
+        .testTarget(name: "DSHSurfaceTests", dependencies: ["DSHSurface"]),
     ]
 )

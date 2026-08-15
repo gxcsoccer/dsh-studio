@@ -15,7 +15,17 @@ struct ContentView: View {
             case .launching(let message):
                 StatusView(title: message, detail: model.workspaces.current?.path)
             case .ready(let url):
-                SurfaceWebView(url: url)
+                NavigationSplitView {
+                    SidebarView()
+                        .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
+                } detail: {
+                    SurfaceWebView(url: url, bridge: model.surface)
+                }
+                .overlay {
+                    if model.paletteOpen {
+                        CommandPaletteView()
+                    }
+                }
             case .failed(let summary, let detail):
                 FailureView(summary: summary, detail: detail)
             }

@@ -21,7 +21,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// packages/bundle/src/client.jsx
+// src/client.jsx
 var client_exports = {};
 __export(client_exports, {
   apply: () => apply,
@@ -30,10 +30,247 @@ __export(client_exports, {
 module.exports = __toCommonJS(client_exports);
 var import_react2 = require("react");
 
-// packages/bundle/src/wedged-session.jsx
+// src/catalog.js
+function projectCatalog(workspaces, sessions) {
+  const archived = new Set(workspaces.archivedSessionIds ?? []);
+  const byId = sessions.byId ?? {};
+  const row = (id) => {
+    const item = byId[id];
+    if (!item || archived.has(id) || item.origin === "subagent" || item.blank && item.id !== sessions.current) {
+      return null;
+    }
+    return {
+      sessionId: item.id,
+      title: item.displayTitle || item.title || id,
+      blank: !!item.blank,
+      running: !!item.running,
+      updatedAt: item.updatedAt ?? 0
+    };
+  };
+  const used = /* @__PURE__ */ new Set();
+  const groups = (workspaces.items ?? []).map((workspace) => {
+    const list = (workspace.sessionIds ?? []).map(row).filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt);
+    for (const session of list) used.add(session.sessionId);
+    return {
+      workspaceId: workspace.workspaceId,
+      title: workspace.title,
+      path: workspace.path,
+      sessions: list
+    };
+  });
+  const ungrouped = (sessions.ids ?? []).filter((id) => !used.has(id)).map(row).filter(Boolean).sort((a, b) => b.updatedAt - a.updatedAt);
+  return {
+    currentSessionId: sessions.current,
+    workspaces: groups,
+    ungrouped
+  };
+}
+
+// src/hide-official-rail.js
+var STYLE_ID = "dsh-studio-hide-rail";
+var RAIL_CSS = `
+[class*="_frame"][data-details-collapsed] {
+  grid-template-columns: 0px minmax(0, 1fr) 0px !important;
+}
+[class*="_frame"]:not([data-details-collapsed]) {
+  grid-template-columns: 0px minmax(0, 1fr) minmax(300px, 520px) !important;
+}
+[class*="_sidebarCol"] {
+  width: 0 !important;
+  max-width: 0 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+`;
+function hideOfficialRail(doc = globalThis.document, Observer = globalThis.MutationObserver) {
+  if (!doc?.documentElement) return () => {
+  };
+  const apply2 = () => ensureStyle(doc);
+  apply2();
+  if (typeof Observer !== "function") return () => {
+  };
+  const observer = new Observer(apply2);
+  observer.observe(doc.documentElement, { subtree: true, childList: true });
+  return () => observer.disconnect();
+}
+function ensureStyle(doc) {
+  if (doc.getElementById(STYLE_ID)) return;
+  const tag = doc.createElement("style");
+  tag.id = STYLE_ID;
+  tag.textContent = RAIL_CSS;
+  (doc.head || doc.documentElement).appendChild(tag);
+}
+
+// src/surface-channel.js
+var VERSION = 1;
+var HANDLER = "studio";
+function encodeResponse(id, value) {
+  return { v: VERSION, type: "res", id, ok: true, value: value ?? {} };
+}
+function encodeError(id, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return { v: VERSION, type: "res", id, ok: false, error: message };
+}
+function encodeEvent(method, payload) {
+  return { v: VERSION, type: "evt", method, payload: payload ?? {} };
+}
+function parseFrame(input) {
+  const frame = typeof input === "string" ? JSON.parse(input) : input;
+  if (!frame || typeof frame !== "object") return null;
+  if (frame.v !== VERSION) return null;
+  if (frame.type !== "req" && frame.type !== "res" && frame.type !== "evt") return null;
+  return frame;
+}
+function nativeHandler(global = globalThis) {
+  return global.webkit?.messageHandlers?.[HANDLER] ?? null;
+}
+function attachSurface(opts, global = globalThis) {
+  const handler = nativeHandler(global);
+  if (!handler) return null;
+  const post = (frame) => handler.postMessage(frame);
+  const api = {
+    dispatch(input) {
+      const frame = parseFrame(input);
+      if (!frame || frame.type !== "req") return Promise.resolve();
+      return Promise.resolve().then(() => opts.onRequest(frame)).then((value) => post(encodeResponse(frame.id, value ?? {}))).catch((error) => post(encodeError(frame.id, error?.message ?? error)));
+    },
+    event(method, payload) {
+      post(encodeEvent(method, payload));
+    }
+  };
+  global.__DSH_STUDIO__ = api;
+  post(encodeEvent("ready", {}));
+  return api;
+}
+
+// src/archive-session.js
+async function archiveSession(ctx, sessionId) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("archiveSession requires a sessionId");
+  }
+  await ctx.workspaces.archiveSession(sessionId);
+  return { sessionId };
+}
+
+// src/open-session.js
+function openSession(ctx, sessionId) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("openSession requires a sessionId");
+  }
+  ctx.sessions.open(sessionId);
+  return { sessionId };
+}
+async function startSession(ctx, workspaceId) {
+  const target = workspaceId || inferWorkspace(ctx);
+  if (!target) {
+    throw new Error("startSession needs a workspace");
+  }
+  const sessionId = await ctx.workspaces.connectWorkspace(target);
+  ctx.sessions.open(sessionId);
+  return { sessionId };
+}
+function inferWorkspace(ctx) {
+  const workspaces = ctx.workspaces.list.getSnapshot();
+  const sessions = ctx.sessions.list.getSnapshot();
+  const current = sessions.current;
+  const currentWorkspaceId = current === void 0 ? void 0 : workspaces.items.find((item) => item.sessionIds.includes(current))?.workspaceId;
+  return currentWorkspaceId ?? workspaces.recentWorkspaceId;
+}
+
+// src/open-settings.js
+function openSettings(doc = globalThis.document) {
+  if (!doc?.querySelector) {
+    throw new Error("openSettings needs a document");
+  }
+  const trigger = doc.querySelector('[class*="settingsArea"] button[aria-haspopup="dialog"]') || doc.querySelector('button[aria-haspopup="dialog"]');
+  if (!trigger || typeof trigger.click !== "function") {
+    throw new Error("settings trigger not found");
+  }
+  trigger.click();
+  return {};
+}
+
+// src/open-workspace.js
+async function openWorkspace(ctx, path) {
+  if (typeof path !== "string" || path.length === 0) {
+    throw new Error("openWorkspace requires a path");
+  }
+  const workspace = await ctx.workspaces.create({ path });
+  const chosen = pickSession(workspace, ctx.sessions.list.getSnapshot());
+  if (chosen) {
+    ctx.sessions.open(chosen);
+    return { workspaceId: workspace.workspaceId, sessionId: chosen };
+  }
+  const sessionId = await ctx.workspaces.connectWorkspace(workspace.workspaceId);
+  ctx.sessions.open(sessionId);
+  return { workspaceId: workspace.workspaceId, sessionId };
+}
+function pickSession(workspace, list) {
+  const byId = list.byId ?? {};
+  const ids = (workspace.sessionIds ?? []).filter((id) => byId[id]);
+  if (list.current && ids.includes(list.current)) return list.current;
+  const ranked = ids.map((id) => byId[id]).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  return (ranked.find((row) => !row.blank) ?? ranked[0])?.id;
+}
+
+// src/session-edit.js
+async function renameSession(ctx, sessionId, title) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("renameSession requires a sessionId");
+  }
+  const next = typeof title === "string" ? title.trim() : "";
+  if (!next) {
+    throw new Error("renameSession requires a title");
+  }
+  const session = ctx.sessions.binding(sessionId)?.session;
+  if (!session) {
+    throw new Error(`unknown session "${sessionId}"`);
+  }
+  const result = await session.rename(next);
+  if (!result?.ok) {
+    throw new Error(result?.error?.message ?? "rename failed");
+  }
+  return { sessionId, title: result.value?.title ?? next };
+}
+async function forkSession(ctx, sessionId) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
+    throw new Error("forkSession requires a sessionId");
+  }
+  const childId = await ctx.sessions.fork({ sessionId, increaseTitle: true });
+  ctx.sessions.open(childId);
+  return { sessionId: childId };
+}
+
+// src/surface-methods.js
+async function handleSurfaceRequest(ctx, frame, deps = {}) {
+  const method = frame?.method;
+  const payload = frame?.payload ?? {};
+  switch (method) {
+    case "openWorkspace":
+      return openWorkspace(ctx, payload.path);
+    case "openSession":
+      return openSession(ctx, payload.sessionId);
+    case "startSession":
+      return startSession(ctx, payload.workspaceId);
+    case "openSettings":
+      return (deps.openSettings ?? openSettings)(deps.document);
+    case "archiveSession":
+      return archiveSession(ctx, payload.sessionId);
+    case "renameSession":
+      return renameSession(ctx, payload.sessionId, payload.title);
+    case "forkSession":
+      return forkSession(ctx, payload.sessionId);
+    default:
+      throw new Error(`unknown surface method: ${method}`);
+  }
+}
+
+// src/wedged-session.jsx
 var import_react = require("react");
 
-// packages/bundle/src/diagnose.js
+// src/diagnose.js
 function diagnoseWedge(events) {
   const pending = /* @__PURE__ */ new Map();
   const settled = /* @__PURE__ */ new Set();
@@ -57,7 +294,7 @@ function diagnoseWedge(events) {
   return { orphanSeq, anchor: lastCleanTurnEnd ?? null };
 }
 
-// packages/bundle/src/wedged-session.jsx
+// src/wedged-session.jsx
 var import_jsx_runtime = require("react/jsx-runtime");
 async function diagnose(api, sessionId) {
   const response = await api.sessions.history({ sessionId });
@@ -125,9 +362,9 @@ var styles = {
   }
 };
 
-// packages/bundle/src/client.jsx
+// src/client.jsx
 var import_jsx_runtime2 = require("react/jsx-runtime");
-var inject = ["slots", "layout", "connection", "sessions"];
+var inject = ["slots", "layout", "connection", "sessions", "workspaces"];
 function apply(ctx) {
   const source = ctx.connection.hostDescription;
   function RuntimeConnectionBanner() {
@@ -156,6 +393,48 @@ function apply(ctx) {
       createWedgedSessionCard(ctx)
     )
   );
+  const surface = attachSurface({
+    async onRequest(frame) {
+      return handleSurfaceRequest(ctx, frame);
+    }
+  });
+  if (surface) {
+    collapseOfficialSidebar(ctx);
+    hideOfficialRail();
+    ctx.effect(() => {
+      const emit = () => {
+        const sessions = ctx.sessions.list.getSnapshot();
+        const workspaces = ctx.workspaces.list.getSnapshot();
+        const row = sessions.current ? sessions.byId[sessions.current] : void 0;
+        surface.event("selection", {
+          sessionId: sessions.current,
+          path: row?.cwd,
+          title: row?.displayTitle
+        });
+        surface.event("catalog", projectCatalog(workspaces, sessions));
+      };
+      emit();
+      const offSessions = ctx.sessions.list.subscribe(emit);
+      const offWorkspaces = ctx.workspaces.list.subscribe(emit);
+      return () => {
+        offSessions();
+        offWorkspaces();
+      };
+    }, "studio: surface catalog");
+  }
+}
+function collapseOfficialSidebar(ctx) {
+  let done = false;
+  const attempt = () => {
+    if (done) return;
+    try {
+      ctx.layout.toggleSidebar();
+      done = true;
+    } catch {
+    }
+  };
+  attempt();
+  if (!done) setTimeout(attempt, 200);
 }
 var styles2 = {
   bar: {

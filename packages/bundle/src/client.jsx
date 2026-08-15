@@ -12,9 +12,18 @@
  * observable whose snapshot is documented as "absent before connect and while
  * reconnecting", and whose subscription covers "description replacement and
  * connection loss".
+ *
+ * The same row also owns the page half of the private chrome channel — the
+ * hook native menus call to open a workspace. That channel is ours, not a
+ * Harness seam; without `webkit.messageHandlers.studio` it simply does not
+ * attach, which is how browser dogfood keeps working.
  */
 import { useSyncExternalStore } from 'react'
 
+import { projectCatalog } from './catalog.js'
+import { hideOfficialRail } from './hide-official-rail.js'
+import { attachSurface } from './surface-channel.js'
+import { handleSurfaceRequest } from './surface-methods.js'
 import { createWedgedSessionCard } from './wedged-session.jsx'
 
 /**
@@ -27,9 +36,11 @@ import { createWedgedSessionCard } from './wedged-session.jsx'
  * least: the shell refuses to boot and names the services it is waiting for.
  *
  * `layout` is required because it declares `shell.overlay`, and a slot cannot
- * be filled before it is declared.
+ * be filled before it is declared. `workspaces` is the navigation face
+ * `openWorkspace` calls; without it the chrome channel would attach and then
+ * throw on the first ⌘O.
  */
-export const inject = ['slots', 'layout', 'connection', 'sessions']
+export const inject = ['slots', 'layout', 'connection', 'sessions', 'workspaces']
 
 export function apply(ctx) {
   const source = ctx.connection.hostDescription
@@ -71,6 +82,58 @@ export function apply(ctx) {
       createWedgedSessionCard(ctx),
     ),
   )
+
+  // Private chrome channel. Absent in a regular browser — `attachSurface`
+  // returns null and the rest of the plugin is unchanged.
+  const surface = attachSurface({
+    async onRequest(frame) {
+      return handleSurfaceRequest(ctx, frame)
+    },
+  })
+
+  if (surface) {
+    // Native chrome owns the session list and the settings door. Collapse
+    // the official column, then zero its grid track: the settings modal is
+    // position:fixed inside that tree, so the slot has to stay mounted.
+    collapseOfficialSidebar(ctx)
+    hideOfficialRail()
+
+    ctx.effect(() => {
+      const emit = () => {
+        const sessions = ctx.sessions.list.getSnapshot()
+        const workspaces = ctx.workspaces.list.getSnapshot()
+        const row = sessions.current ? sessions.byId[sessions.current] : undefined
+        surface.event('selection', {
+          sessionId: sessions.current,
+          path: row?.cwd,
+          title: row?.displayTitle,
+        })
+        surface.event('catalog', projectCatalog(workspaces, sessions))
+      }
+      emit()
+      const offSessions = ctx.sessions.list.subscribe(emit)
+      const offWorkspaces = ctx.workspaces.list.subscribe(emit)
+      return () => {
+        offSessions()
+        offWorkspaces()
+      }
+    }, 'studio: surface catalog')
+  }
+}
+
+function collapseOfficialSidebar(ctx) {
+  let done = false
+  const attempt = () => {
+    if (done) return
+    try {
+      ctx.layout.toggleSidebar()
+      done = true
+    } catch {
+      // Root entry has not mounted yet; the layout face throws until then.
+    }
+  }
+  attempt()
+  if (!done) setTimeout(attempt, 200)
 }
 
 const styles = {

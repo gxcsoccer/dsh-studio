@@ -8,7 +8,7 @@ DSH Studio is a **carrier, a few host backends, a client roster, and a native cl
 
 - Do not clone or vendor [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness). Runtime comes from official `dsh`.
 - Do not treat an upstream PR as a prerequisite for desktop work. Official docs already say UI is a plugin, and the API gateway already says carriers are ours to write.
-- **Do not invent RPC methods or private routes.** 契约是 `RpcMethodMap`。缺能力就加 host 插件注册进已有的域，或走 Typert Remote；不要在 carrier 上开私有路由。
+- **Do not invent RPC methods or private routes.** 契约是 `RpcMethodMap`。缺能力就加 host 插件注册进已有的域，或走 Typert Remote；不要在 carrier 上开私有路由。原生 chrome 和我们自己的 client 插件之间要说话，走 `DSHSurface` 那条私有通道，不要把 chrome 方法塞进网关。
 - **Do not stack `@deepseek-ai/dsh-web-app`,** and do not load `dsh --profile web` in a WebView. 我们组自己的 client roster——[组 roster 和 iframe 是两件事](./ARCHITECTURE.md#4-ui-策略路线-c)。
 - **Do not put credentials in process env.** Keychain 走 `CredentialProvider` 后端。
 - **Do not poll what streams.** mux / host 是 push 流；轮询是 bug 不是风格。

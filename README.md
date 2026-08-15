@@ -85,7 +85,7 @@ DeepSeek 的设计是 **「一切皆插件」**（Everything is a plugin），�
 
 本仓库跟着官方已发布的扩展点走（`ctx.apiProxy` / `toFetchHandler` / `RpcMethodMap` / `session/event` / `ctx.agents` / `CredentialProvider` / `dsh.client` + SlotMap / `apply` / `inject` / `Config` / `ctx.effect`），而不是锁死一份 fork。
 
-实现按 [Roadmap](./ARCHITECTURE.md#5-roadmap) 的 M0–M4 推进。当前可以本机 dogfood：应用会自己拉起 `studio` 组合、加载我们自己组的 client roster（**不叠 `dsh-web-app`**）、并在 turn 结束或需要审批时发原生通知。会话界面仍由官方 client 插件行渲染——那是路线 C 的中间态，chrome 的原生化按 slot 逐个来。
+实现按 [Roadmap](./ARCHITECTURE.md#5-roadmap) 的 M0–M4 推进。当前可以本机 dogfood：应用会自己拉起 `studio` 组合、加载我们自己组的 client roster（**不叠 `dsh-web-app`**）、原生侧栏列出会话、⌘O / ⌘N 经私有通道驱动页面导航，并在 turn 结束或需要审批时发原生通知。会话流仍由官方 client 插件行渲染——那是路线 C 的中间态。
 
 上手见 [docs/running.md](./docs/running.md)。
 

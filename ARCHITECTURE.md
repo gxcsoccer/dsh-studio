@@ -477,6 +477,20 @@ carrier 是**终点形态，不是起点**。原因在 [§4](#client-plane-硬�
 
 耦合的准确描述是：**松在 slot 边界，紧在服务名与声明契约**。
 
+### 原生 chrome 与浏览器 roster 之间的私有通道
+
+路线 C 的中间态是：会话还在 WKWebView 里画，窗口 / 菜单 / 以后的侧栏在 SwiftUI 里。选中哪个工作区、打开哪个会话，是**浏览器侧的 UI 状态**，网关上没有对应方法——`workspace.create` 只注册，不导航。
+
+所以两半之间需要一条通道。它**不是 harness 契约**：
+
+- 不上 carrier，不进 `RpcMethodMap`，不发明网关方法。
+- 只连接 `DSH.app` 和我们自己的 client 插件。普通浏览器打开 loopback 时没有 `webkit.messageHandlers.studio`，插件安静地不装这条通道。
+- 形状是自有信封（`v` / `type: req|res|evt` / `id` / `method`），WKScriptMessageHandler 上行，`evaluateJavaScript` 调 `window.__DSH_STUDIO__.dispatch` 下行。两边的编解码分列 `app/Sources/DSHSurface` 和 `packages/bundle/src/surface-channel.js`。
+
+第一批方法刻意很少，按产品需要长：`openWorkspace` / `openSession` / `startSession` / `openSettings` / `archiveSession` / `renameSession` / `forkSession` 让原生 chrome 驱动页面导航；`ready` / `selection` / `catalog` 三个事件做握手、窗口标题、以及侧栏要画的那份分组列表。`catalog` 是 client store 的投影，不是第二份注册表——分组、归档、标题都在页面算好再送过来。`openSettings` 点的是官方设置触发器：开合状态在 `ui-settings-general` 组件里，网关上没有对应方法。`archiveSession` 走页面上的 `workspaces.archiveSession`；`renameSession` / `forkSession` 走会话面，和官方行菜单同一条路。命令面板的正文命中走网关 `session.search`，不上通道。
+
+官方侧栏在原生窗口里把网格第一列收成 0：会话列表已经在 `NavigationSplitView` 里，设置弹层是 `position: fixed`、仍挂在那棵树上，所以 `ui-layout` / `ui-sidebar` 先留着、只是不再占宽度。普通浏览器不走这条通道，官方侧栏照常显示。
+
 ---
 
 ## 5. Roadmap
@@ -575,6 +589,7 @@ app/
     Generated/              #   由 zod schema 生成，不手改
   Sources/DSHHost/          # 本机运行时生命周期：找到 / 拉起 / 停掉 dsh
   Sources/dsh-probe/        # 验收探针 / 冒烟（§6 第三道防线）
+  Sources/DSHSurface/       # 原生 ↔ 我们自己 client 插件的私有通道（不是契约）
   Sources/DSH/              # SwiftUI 宿主 — M2 起
   Tests/Fixtures/           # 录制的 mux 流（§6 第二道防线）
 packages/bundle/            # studio bundle

@@ -27,11 +27,12 @@ struct StudioCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            // "Add", not "open": this registers the directory and it appears in
-            // the sidebar immediately, but selecting it is client-side state the
-            // native side cannot reach yet. Calling it Open would promise
-            // something that does not happen.
-            Button("添加工作区…") {
+            Button("新会话") {
+                Task { await model.startSession() }
+            }
+            .keyboardShortcut("n", modifiers: .command)
+
+            Button("打开工作区…") {
                 if let url = model.workspaces.chooseDirectory() {
                     Task { await model.open(workspace: url) }
                 }
@@ -44,6 +45,41 @@ struct StudioCommands: Commands {
                 }
             }
             .disabled(model.workspaces.recents.isEmpty)
+
+            Divider()
+
+            Button("重命名会话…") {
+                model.promptRename()
+            }
+            .disabled(model.currentSession == nil || model.currentSession?.blank == true)
+
+            Button("分叉会话") {
+                if let id = model.currentSession?.sessionId {
+                    Task { await model.forkSession(id) }
+                }
+            }
+            .disabled(model.currentSession == nil || model.currentSession?.blank == true)
+
+            Button("归档会话") {
+                if let id = model.currentSession?.sessionId {
+                    Task { await model.archiveSession(id) }
+                }
+            }
+            .disabled(model.currentSession == nil || model.currentSession?.blank == true)
+        }
+
+        CommandGroup(replacing: .appSettings) {
+            Button("设置…") {
+                Task { await model.openSettings() }
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
+
+        CommandGroup(after: .toolbar) {
+            Button("搜索") {
+                model.togglePalette()
+            }
+            .keyboardShortcut("k", modifiers: .command)
         }
 
         CommandMenu("运行时") {
