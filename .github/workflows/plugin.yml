@@ -1,0 +1,32 @@
+name: plugin
+
+on:
+  push:
+    paths:
+      - plugin/**
+      - .github/workflows/plugin.yml
+  pull_request:
+    paths:
+      - plugin/**
+      - .github/workflows/plugin.yml
+
+jobs:
+  build:
+    name: build plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Smoke
+        run: npm run smoke

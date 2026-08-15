@@ -1,0 +1,23 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+		A11A00000000000000000D /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A11A000000000000000004 = {isa = PBXGroup; children = (A11A000000000000000006 /* Sources/DSH */, A11A000000000000000005 /* Products */,); sourceTree = "<group>"; };
+		A11A000000000000000005 /* Products */ = {isa = PBXGroup; children = (A11A000000000000000003 /* DSH.app */,); name = Products; sourceTree = "<group>"; };
+		A11A000000000000000006 /* Sources/DSH */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/DSH; sourceTree = "<group>"; };
+		A11A000000000000000003 /* DSH.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DSH.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A11A000000000000000002 /* DSH */ = {isa = PBXNativeTarget; buildConfigurationList = A11A000000000000000008; buildPhases = (A11A00000000000000000D /* Frameworks */,); buildRules = (); dependencies = (); fileSystemSynchronizedGroups = (A11A000000000000000006 /* Sources/DSH */,); name = DSH; productName = DSH; productReference = A11A000000000000000003 /* DSH.app */; productType = "com.apple.product-type.application"; };
+		A11A000000000000000001 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600;}; buildConfigurationList = A11A000000000000000007; compatibilityVersion = "Xcode 15.0"; developmentRegion = "zh-Hans"; hasScannedForEncodings = 0; knownRegions = (en, Base, "zh-Hans",); mainGroup = A11A000000000000000004; productRefGroup = A11A000000000000000005; projectDirPath = ""; projectRoot = ""; targets = (A11A000000000000000002 /* DSH */,); };
+		A11A000000000000000009 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = dwarf; GCC_OPTIMIZATION_LEVEL = 0; MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0;}; name = Debug;};
+		A11A00000000000000000A /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_VERSION = 5.0;}; name = Release;};
+		A11A00000000000000000B /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Sources/DSH/DSH.entitlements; CODE_SIGN_STYLE = Automatic; COMBINE_HIDPI_IMAGES = YES; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = NO; ENABLE_HARDENED_RUNTIME = NO; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Sources/DSH/Info.plist; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = ai.dsh.studio; PRODUCT_NAME = "DSH Studio"; SWIFT_VERSION = 5.0;}; name = Debug;};
+		A11A00000000000000000C /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Sources/DSH/DSH.entitlements; CODE_SIGN_STYLE = Automatic; COMBINE_HIDPI_IMAGES = YES; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = NO; ENABLE_HARDENED_RUNTIME = NO; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Sources/DSH/Info.plist; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = ai.dsh.studio; PRODUCT_NAME = "DSH Studio"; SWIFT_VERSION = 5.0;}; name = Release;};
+		A11A000000000000000007 /* proj */ = {isa = XCConfigurationList; buildConfigurations = (A11A000000000000000009 /* Debug */, A11A00000000000000000A /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		A11A000000000000000008 /* tgt */ = {isa = XCConfigurationList; buildConfigurations = (A11A00000000000000000B /* Debug */, A11A00000000000000000C /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+	};
+	rootObject = A11A000000000000000001 /* Project object */;
+}

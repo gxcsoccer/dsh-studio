@@ -158,7 +158,7 @@ Studio 的会话表面从这条流渲染（恢复、分叉、检索、回放都�
 - 语义对齐官方：会话状态以 `session/event` 日志为准；活的控制面对齐 `ctx.agents`。
 - 原生壳和日后的 Tauri 宿主共用同一份契约。桥稳定，两端壳可以换。
 
-具体传输和路由表属于实现，不在这份宣言里冻结。先写 Mac 宿主时再定第一版，并保持小、可版本化。
+第一版路由（仅 loopback JSON）：GET /health、GET /status、GET /theme、POST /theme、POST /notify-test。默认 `127.0.0.1:43180`。theme 热更新会返回 tokens 与 `--dsh-*` CSS 变量，供 WKWebView 注入。
 
 ---
 
@@ -173,13 +173,13 @@ Studio 的会话表面从这条流渲染（恢复、分叉、检索、回放都�
 
 ---
 
-## 5. Intended repository layout (not implemented in this commit)
+## 5. Repository layout
 
 ```
-apps/macos/              # SwiftUI host — Mac-first product
-apps/tauri/              # later Win / Linux host, same bridge
-packages/bundle/         # TypeScript Cordis bundle (apply + dsh.bundle patch)
-docs/                    # product notes
+app/                         SwiftUI macOS 14+ host (Package.swift + DSH.xcodeproj)
+plugin/                      TypeScript Cordis bundle (apply + dsh.bundle patch)
+themes/                      system, studio-light, studio-dark
+docs/                        product.md, theming.md
 ```
 
-这个提交只放宣言与架构。实现由后续工作按上述分层填入。
+Win / Linux Tauri host is later and is not in this tree. The Mac host and the bundle share the loopback bridge contract above.

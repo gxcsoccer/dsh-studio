@@ -3,7 +3,7 @@
 DSH Studio 要对齐的是 Linear / Raycast 这一档桌面，而不是「能把官方网页打开」这一档壳。
 The bar is a native product, not a successful iframe.
 
-这份笔记写的是 *产品标准*。当前仓库还没有实现桌面应用。
+这份笔记写的是 *产品标准*。`app/` 已按这些标准落地第一版 SwiftUI 宿主：首次运行检查、空状态、命令面板、钥匙串、工作区书签、主题热更新。Linux 上不要指望编出 .app。
 
 ---
 
