@@ -45,7 +45,8 @@ final class AppModel {
             return
         }
         workspaces.remember(workspace)
-        await start(in: workspace)
+        await start(anchoredAt: workspace)
+        await register(workspace)
     }
 
     /// `open -a DSH.app --args --workspace <dir>`, and by extension opening a
@@ -67,16 +68,40 @@ final class AppModel {
         return url
     }
 
+    /// Opening a workspace registers it with the running runtime. It does *not*
+    /// restart anything.
+    ///
+    /// One runtime already serves many workspaces — the registry is a
+    /// process-wide table and every session carries its own immutable cwd, so
+    /// the host's working directory is only a fallback for calls that have no
+    /// session. Tearing the process down to "switch" would kill every live
+    /// agent to change a default, which is a data-loss bug wearing the costume
+    /// of a workspace switcher.
     func open(workspace: URL) async {
         workspaces.remember(workspace)
-        await stopHost()
-        await start(in: workspace)
+        if case .ready = phase {
+            await register(workspace)
+        } else {
+            await start(anchoredAt: workspace)
+            await register(workspace)
+        }
     }
 
+    /// The explicit, destructive one — bound to a shortcut the user has to
+    /// choose deliberately.
     func restart() async {
-        guard let workspace = workspaces.current else { return await boot() }
+        let anchor = workspaces.current
         await stopHost()
-        await start(in: workspace)
+        guard let anchor else { return await boot() }
+        await start(anchoredAt: anchor)
+    }
+
+    private func register(_ workspace: URL) async {
+        let client = ApiClient(baseURL: Self.surfaceURL)
+        // Idempotent by contract: an already-registered path comes back with
+        // `created: false`, so reopening a familiar project is a no-op rather
+        // than an error to explain.
+        _ = try? await client.call(WorkspaceCreateRequest(path: workspace.path))
     }
 
     func shutdown() async {
@@ -86,7 +111,10 @@ final class AppModel {
 
     // MARK: - Runtime
 
-    private func start(in workspace: URL) async {
+    /// - Parameter anchor: the child's working directory. Only a fallback for
+    ///   sessions and sandbox calls that carry no cwd of their own, so it is
+    ///   fixed for the life of the process rather than following the UI.
+    private func start(anchoredAt anchor: URL) async {
         // Adopt a runtime that is already answering rather than colliding with
         // it. Reopening the app after a crash, or running it beside a terminal
         // `dsh`, should not become a port fight.
@@ -107,7 +135,7 @@ final class AppModel {
             launcher: launcher,
             profile: "studio",
             port: Self.surfacePort,
-            workingDirectory: workspace
+            workingDirectory: anchor
         )
         host = process
         ownsHost = true

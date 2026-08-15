@@ -27,7 +27,11 @@ struct StudioCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("打开工作区…") {
+            // "Add", not "open": this registers the directory and it appears in
+            // the sidebar immediately, but selecting it is client-side state the
+            // native side cannot reach yet. Calling it Open would promise
+            // something that does not happen.
+            Button("添加工作区…") {
                 if let url = model.workspaces.chooseDirectory() {
                     Task { await model.open(workspace: url) }
                 }
