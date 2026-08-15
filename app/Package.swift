@@ -23,5 +23,11 @@ let package = Package(
         .executableTarget(name: "dsh-probe", dependencies: ["DSHKit", "DSHHost"]),
         // The desktop product.
         .executableTarget(name: "DSH", dependencies: ["DSHKit", "DSHHost"]),
+
+        // Replays recorded downlink traffic through the real decoder. This is
+        // the defense that catches upstream drift without a live host — see
+        // ARCHITECTURE §6.
+        .testTarget(name: "DSHKitTests", dependencies: ["DSHKit"]),
+        .testTarget(name: "DSHHostTests", dependencies: ["DSHHost"]),
     ]
 )
