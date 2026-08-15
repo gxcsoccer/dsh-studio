@@ -11,6 +11,15 @@
   --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   --serif: "Source Serif 4", "Songti SC", Georgia, serif;
 
+  /* DeepSeek 品牌蓝，单色无渐变。 */
+  --ds: #4d6bfe;
+  --ds-600: #3a55e0;
+  --ds-700: #2b41b8;
+  --ds-800: #1e2e85;
+  --ds-200: #c3ccff;
+  --ds-100: #e4e9ff;
+  --ds-050: #f2f5ff;
+
   --pg-bg: #ececed;
   --pg-card: #fff;
   --pg-fg: #1a1a1d;
@@ -113,6 +122,9 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
   --ink: #17171a; --muted: #5f5f68; --faint: #9a9aa3;
   --line: #e8e8eb; --line2: #dcdce0;
   --field: #17171a; --on-field: #fff; --accent: #17171a;
+  /* --live 只在「模型正在动」的地方出现：流式光标、运行中的工具轨、
+     上下文环的已用弧、发送键、焦点环。闲着的时候整个窗口不该有它。 */
+  --live: var(--ds);
   --ok: #1a7f52; --warn: #b26a00; --bad: #c0392b;
   --r-sheet: 12px; --r-card: 9px; --r-ctl: 7px;
   --elev: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
@@ -184,12 +196,13 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .ses li.cur { background: var(--sheet); color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
 .s-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .s-when { font-family: var(--f-mono); font-size: 10px; color: var(--faint); flex: none; }
+/* 运行中和待交互用不同的呼吸频率，余光就能分开。 */
 .sdot { width: 6px; height: 6px; flex: none; border-radius: 50%; }
-.sdot.running { background: var(--accent); animation: pulse 1.5s ease infinite; }
-.sdot.wait { background: var(--warn); }
+.sdot.running { background: var(--live); animation: pulse 1.4s ease-in-out infinite; }
+.sdot.wait { background: var(--warn); animation: pulse 2.6s ease-in-out infinite; }
 .sdot.done { background: var(--ok); }
 .sdot.idle { background: transparent; box-shadow: inset 0 0 0 1px var(--line2); }
-@keyframes pulse { 50% { opacity: .28; } }
+@keyframes pulse { 50% { opacity: .3; } }
 .side-foot { margin-top: auto; padding: 10px 9px 0; display: flex; gap: 10px; font-size: 11px; color: var(--faint); }
 
 /* ————— 中栏：画布 + 浮起的输入栏 ————— */
@@ -223,6 +236,18 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .n-meta { font-family: var(--f-mono); font-size: 10px; color: var(--faint); margin-bottom: 5px; letter-spacing: var(--lbl-tr); text-transform: var(--lbl-tt); }
 .n-asst { font-family: var(--f-prose); font-size: var(--prose-size); line-height: var(--prose-lh); }
 .n-asst p { margin: 0; }
+/* 流式光标：整段文字里唯一带品牌色的东西，写完就消失。 */
+.caret {
+  display: inline-block; width: 2px; height: 1em;
+  background: var(--live); margin-left: 2px; vertical-align: -.14em;
+  animation: blink 1.05s steps(2, start) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* 轮次分隔：一条发丝加一个极小的编号，长会话里用来定位。 */
+.turnsep { display: flex; align-items: center; gap: 10px; margin: 22px 0 18px; }
+.turnsep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.turnsep span { font-family: var(--f-mono); font-size: 9.5px; color: var(--faint); letter-spacing: .08em; flex: none; }
 
 .think { margin-bottom: 10px; }
 .think summary { display: flex; align-items: center; gap: 9px; padding: 5px 0; list-style: none; cursor: pointer; }
@@ -237,18 +262,38 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 /* 工具：不描框。状态用左侧一根轨，内容坐在凹面上。 */
 .tool { margin-bottom: 12px; border-radius: var(--r-card); overflow: hidden; background: var(--recess); }
 .tool-h { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 13px; text-align: left; position: relative; }
+/* 正在跑：一道光沿着 2px 的轨往下走，比转圈安静，也说明了方向。 */
 .tool-h::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
-  background: var(--accent); opacity: 0;
-  transition: opacity 200ms ease;
+  background: var(--live); opacity: 0;
+  transition: opacity 260ms ease;
 }
-.tool.run .tool-h::before { opacity: 1; }
+.tool.run .tool-h::before {
+  opacity: 1;
+  background: linear-gradient(180deg, transparent 0%, var(--live) 32%, var(--live) 68%, transparent 100%);
+  background-size: 100% 240%;
+  animation: rail 1.7s ease-in-out infinite;
+}
+@keyframes rail { from { background-position: 0 -120%; } to { background-position: 0 120%; } }
 .tool-h:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
-.tname { font-family: var(--f-chrome); font-size: var(--lbl-size); font-weight: 600; letter-spacing: var(--lbl-tr); text-transform: var(--lbl-tt); color: var(--muted); flex: none; }
+.tname {
+  font-family: var(--f-chrome); font-size: var(--lbl-size); font-weight: 600;
+  letter-spacing: var(--lbl-tr); text-transform: var(--lbl-tt);
+  color: var(--muted); flex: none; min-width: 34px;
+}
+.tool.run .tname { color: var(--live); }
 .ttitle { font-family: var(--f-mono); font-size: 11.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tmeta { font-family: var(--f-mono); font-size: 10.5px; color: var(--faint); flex: none; }
-.tstate { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
-.tool.run .tstate { animation: pulse 1s linear infinite; }
+.tmeta { font-family: var(--f-mono); font-size: 10.5px; color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+/* 跑的时候是活的计时器，停下来换成最终耗时——同一个位置，不跳。 */
+.telapsed { font-family: var(--f-mono); font-size: 10.5px; color: var(--live); flex: none; font-variant-numeric: tabular-nums; }
+.tpeek {
+  font-size: 10.5px; color: var(--faint); flex: none;
+  opacity: 0; transform: translateX(-3px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.tool-h:hover .tpeek { opacity: 1; transform: none; }
+.tstate { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--live); }
+.tool.run .tstate { animation: pulse 1.2s ease-in-out infinite; }
 .tool.ok .tstate { background: var(--ok); }
 .tool-b { display: none; padding: 0 8px 8px; }
 .tool.open .tool-b { display: block; }
@@ -272,10 +317,14 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .tx { white-space: pre; padding-right: 14px; }
 .k { color: var(--syn-k); } .s { color: var(--syn-s); } .f { color: var(--syn-f); }
 .n { color: var(--syn-n); } .c { color: var(--syn-c); } .o { color: var(--syn-o); }
+.no { font-variant-numeric: tabular-nums; }
 .dl .no { width: 26px; text-align: center; padding: 0; }
 .dl.add { background: color-mix(in srgb, var(--ok) 12%, transparent); }
 .dl.del { background: color-mix(in srgb, var(--bad) 11%, transparent); }
 .dl.add .no { color: var(--ok); } .dl.del .no { color: var(--bad); }
+/* 改动的行错峰落位，读得出「这里改了几处」。 */
+.dl.add, .dl.del { animation: dline 420ms cubic-bezier(.16,1,.3,1) both; animation-delay: var(--d, 0ms); }
+@keyframes dline { from { opacity: 0; transform: translateX(-5px); } to { opacity: 1; transform: none; } }
 .dfoot { font-family: var(--f-mono); font-size: 10.5px; color: var(--faint); padding: 0 13px 10px; }
 .term { background: var(--term-bg); color: var(--term-fg); padding: 12px 14px; font-family: var(--f-mono); font-size: 12.5px; line-height: 21px; white-space: pre; overflow: auto; margin: 0; }
 .term .dim { opacity: .74; } .term .pr { opacity: .5; }
@@ -298,8 +347,10 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .todo.now { color: var(--ink); } .todo.now b { box-shadow: inset 0 0 0 2px var(--accent); }
 
 .cwrap { padding: 10px 12px 12px; position: relative; }
-.composer { border-radius: var(--r-card); background: var(--recess); transition: box-shadow 180ms ease; }
-.composer:focus-within { box-shadow: 0 0 0 2px color-mix(in srgb, var(--field) 30%, transparent); }
+.composer { border-radius: var(--r-card); background: var(--recess); transition: box-shadow 200ms ease; }
+.composer:focus-within {
+  box-shadow: 0 0 0 1.5px var(--live), 0 0 0 5px color-mix(in srgb, var(--live) 16%, transparent);
+}
 .crow1 { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px 4px; }
 .plus { font-family: var(--f-mono); font-size: 14px; color: var(--faint); width: 20px; height: 20px; flex: none; border-radius: 5px; line-height: 1; }
 .plus:hover { color: var(--ink); background: var(--sheet); }
@@ -314,15 +365,28 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
   transition: color 140ms ease;
 }
 .chip:hover { color: var(--ink); }
-.ringwrap { flex: none; display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 10.5px; color: var(--faint); }
-.ring { width: 14px; height: 14px; border-radius: 50%; }
+.ringwrap { flex: none; display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* 上下文占用环：挂载时从 0 走到实际值，是整个窗口唯一一张图表。 */
+@property --pct { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
+.ring {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: conic-gradient(var(--live) var(--pct), var(--line2) 0);
+  transition: --pct 1000ms cubic-bezier(.16,1,.3,1);
+}
 .send {
   flex: none; width: 28px; height: 24px; border-radius: var(--r-ctl);
-  background: var(--field); color: var(--on-field); font-size: 12px;
+  background: var(--live); color: #fff; font-size: 12px;
   display: grid; place-items: center;
-  transition: transform 200ms cubic-bezier(.34,1.6,.5,1);
+  transition: transform 220ms cubic-bezier(.34,1.6,.5,1), background 200ms ease;
 }
-.send:hover { transform: translateY(-1px) scale(1.04); }
+.send:hover { transform: translateY(-1px); }
+.send:active { transform: translateY(0) scale(.94); }
+/* 跑起来的时候箭头收成一个方块 = 停止，同一个键不换位置。 */
+.send i { display: block; width: 9px; height: 9px; transition: all 260ms cubic-bezier(.34,1.6,.5,1); }
+.send i::before { content: "↑"; font-style: normal; line-height: 9px; }
+.app[data-run="1"] .send { background: var(--ink); }
+.app[data-run="1"] .send i { width: 8px; height: 8px; background: currentColor; border-radius: 1.5px; }
+.app[data-run="1"] .send i::before { content: ""; }
 
 .approve { border-radius: var(--r-card); background: color-mix(in srgb, var(--warn) 8%, var(--sheet)); box-shadow: inset 2px 0 0 var(--warn); animation: rise 300ms cubic-bezier(.16,1,.3,1) both; }
 .ap-top { display: flex; align-items: baseline; gap: 9px; padding: 11px 14px 5px; }
@@ -421,41 +485,43 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .app[data-k="web"] {
   --ground: #f1f1f2; --sheet: #fff; --recess: #f6f6f7;
   --ink: #1f2023; --muted: #62636b; --faint: #96979f; --line: #e8e8eb; --line2: #dedee2;
-  --field: #2b2d31; --on-field: #fff; --accent: #5b5fc7;
+  --field: #2b2d31; --on-field: #fff; --accent: #5b5fc7; --live: #5b5fc7;
   --syn-k: #cf222e; --syn-s: #0a3069; --syn-f: #8250df; --syn-n: #0550ae; --syn-c: #b9bcc4; --syn-o: #24292f;
   --term-bg: #1c1d21; --term-fg: #eceef2;
 }
 .app[data-k="web"][data-m="dark"] {
   --ground: #111214; --sheet: #1b1c1f; --recess: #232428;
   --ink: #e6e6e9; --muted: #a0a1a9; --faint: #75767e; --line: #2c2d33; --line2: #3a3b42;
-  --field: #e6e6e9; --on-field: #1b1c1f; --accent: #8a8ee0;
+  --field: #e6e6e9; --on-field: #1b1c1f; --accent: #8a8ee0; --live: #8a8ee0;
   --syn-k: #ff7b72; --syn-s: #a5d6ff; --syn-f: #d2a8ff; --syn-n: #79c0ff; --syn-c: #565b64; --syn-o: #e6e6e9;
   --term-bg: #0c0d0f;
   --elev: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.5);
   --elev-float: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.6);
 }
 
-/* —— 蓝图：一个色相。守 0 圆角，但改用「底场 / 纸面」两层做深度，不再靠描边。 —— */
+/* —— 蓝图：整套只用 DeepSeek 那一个色相拉出十个值。
+      守 0 圆角，但改用「底场 / 纸面」两层做深度，不再靠描边。 —— */
 .app[data-k="blueprint"] {
-  --ground: #eeeef8; --sheet: #fff; --recess: #f4f4fb;
-  --ink: #1313ba; --muted: #4a4ac4; --faint: #8f8fc4; --line: #dedef2; --line2: #cbcbef;
-  --field: #1313ba; --on-field: #fff; --accent: #6666fd;
+  --ground: var(--ds-050); --sheet: #fff; --recess: #f7f9ff;
+  --ink: var(--ds-800); --muted: rgba(30,46,133,.72); --faint: #9aa5df;
+  --line: #e2e7ff; --line2: var(--ds-200);
+  --field: var(--ds-600); --on-field: #fff; --accent: var(--ds); --live: var(--ds);
   --r-sheet: 4px; --r-card: 3px; --r-ctl: 2px;
   --f-chrome: var(--mono);
   --title-size: 20px; --title-w: 700; --title-tr: -.03em;
-  --syn-k: #6666fd; --syn-s: #1313ba; --syn-f: #1313ba; --syn-n: #1313ba; --syn-c: #b9b9e4; --syn-o: #7171a8;
-  --term-bg: #1313ba; --term-fg: #fff;
-  --elev: 0 1px 2px rgba(19,19,186,.06), 0 8px 24px rgba(19,19,186,.07);
-  --elev-float: 0 1px 2px rgba(19,19,186,.07), 0 12px 30px rgba(19,19,186,.11);
+  --syn-k: var(--ds); --syn-s: var(--ds-700); --syn-f: var(--ds-700); --syn-n: var(--ds-700); --syn-c: #b7c0f0; --syn-o: #5f6bab;
+  --term-bg: var(--ds-800); --term-fg: #fff;
+  --elev: 0 1px 2px rgba(30,46,133,.06), 0 8px 24px rgba(30,46,133,.08);
+  --elev-float: 0 1px 2px rgba(30,46,133,.07), 0 12px 30px rgba(30,46,133,.12);
 }
 .app[data-k="blueprint"][data-m="dark"] {
-  --ground: #06063a; --sheet: #0d0d5e; --recess: #131372;
-  --ink: #fff; --muted: rgba(255,255,255,.76); --faint: rgba(255,255,255,.48);
-  --line: rgba(255,255,255,.12); --line2: rgba(255,255,255,.22);
-  --field: #fff; --on-field: #1313ba; --accent: #9c9cff;
-  --syn-k: #9c9cff; --syn-s: #cfcfff; --syn-f: #cfcfff; --syn-n: #cfcfff; --syn-c: rgba(255,255,255,.34); --syn-o: rgba(255,255,255,.66);
-  --term-bg: #03032a;
-  --elev: 0 8px 24px rgba(0,0,0,.4); --elev-float: 0 12px 32px rgba(0,0,0,.5);
+  --ground: #0a0f33; --sheet: #121a4d; --recess: #17205e;
+  --ink: #fff; --muted: rgba(255,255,255,.76); --faint: rgba(255,255,255,.46);
+  --line: rgba(255,255,255,.12); --line2: rgba(255,255,255,.2);
+  --field: #fff; --on-field: var(--ds-800); --accent: #8fa1ff; --live: #8fa1ff;
+  --syn-k: #8fa1ff; --syn-s: #cfd7ff; --syn-f: #cfd7ff; --syn-n: #cfd7ff; --syn-c: rgba(255,255,255,.32); --syn-o: rgba(255,255,255,.66);
+  --term-bg: #060a24;
+  --elev: 0 8px 24px rgba(0,0,0,.45); --elev-float: 0 12px 32px rgba(0,0,0,.55);
 }
 .app[data-k="blueprint"] .sdot, .app[data-k="blueprint"] .tstate,
 .app[data-k="blueprint"] .ring, .app[data-k="blueprint"] .sbar .dot,
@@ -477,7 +543,7 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .app[data-k="graphite"][data-m="dark"] {
   --ground: #000; --sheet: #0e0e0e; --recess: #171717;
   --ink: #ededed; --muted: #a1a1a1; --faint: #6f6f6f; --line: #1f1f1f; --line2: #2e2e2e;
-  --field: #ededed; --on-field: #000; --accent: #ededed;
+  --field: #ededed; --on-field: #000; --accent: #ededed; --live: #6f88ff;
   --ok: #45b26b; --warn: #d99400; --bad: #e5484d;
   --syn-k: #ededed; --syn-s: #9a9a9a; --syn-f: #ededed; --syn-n: #9a9a9a; --syn-c: #4a4a4a; --syn-o: #c9c9c9;
   --term-bg: #050505;
@@ -505,7 +571,7 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .app[data-k="vellum"][data-m="dark"] {
   --ground: #14120f; --sheet: #1d1a16; --recess: #262219;
   --ink: #f0ebe0; --muted: #b4ac9c; --faint: #857d6e; --line: #302c25; --line2: #443e34;
-  --field: #c9b98f; --on-field: #1d1a16; --accent: #d2a06a;
+  --field: #c9b98f; --on-field: #1d1a16; --accent: #d2a06a; --live: #8fa1ff;
   --syn-k: #d2a06a; --syn-s: #97c9a5; --syn-f: #a8bde8; --syn-n: #e0a094; --syn-c: #5f594c; --syn-o: #ddd6c8;
   --term-bg: #0e0c09;
   --elev: 0 8px 22px rgba(0,0,0,.5); --elev-float: 0 12px 30px rgba(0,0,0,.6);
@@ -522,7 +588,7 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .app[data-k="instrument"] {
   --ground: #dcdad4; --sheet: #f0efec; --recess: #e4e2dc;
   --ink: #16161a; --muted: #55555d; --faint: #8a8992; --line: #d2d0c9; --line2: #bcbab2;
-  --field: #16161a; --on-field: #f0efec; --accent: #ff5c00;
+  --field: #16161a; --on-field: #f0efec; --accent: #ff5c00; --live: #ff5c00;
   --ok: #1f7a4d; --warn: #b26a00; --bad: #cc2b1d;
   --r-sheet: 3px; --r-card: 2px; --r-ctl: 2px;
   --lbl-size: 9px; --lbl-tr: .14em; --lbl-tt: uppercase; --lbl-w: 700;
@@ -535,7 +601,7 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .app[data-k="instrument"][data-m="dark"] {
   --ground: #131316; --sheet: #1c1c20; --recess: #242429;
   --ink: #f0f0ee; --muted: #a5a5ac; --faint: #6e6e77; --line: #2a2a31; --line2: #3b3b44;
-  --field: #f0f0ee; --on-field: #1c1c20; --accent: #ff5c00;
+  --field: #f0f0ee; --on-field: #1c1c20; --accent: #ff5c00; --live: #ff5c00;
   --syn-k: #ff8c4d; --syn-s: #6fcf9a; --syn-f: #f0f0ee; --syn-n: #b79cff; --syn-c: #55555e; --syn-o: #c9c9d1;
   --term-bg: #0b0b0d;
   --elev: 0 4px 14px rgba(0,0,0,.5); --elev-float: 0 8px 22px rgba(0,0,0,.6);
@@ -554,7 +620,7 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .app[data-k="phosphor"] {
   --ground: #080908; --sheet: #0f110f; --recess: #151815;
   --ink: #d9e0d4; --muted: #8d9689; --faint: #5c6459; --line: #1c201b; --line2: #2a2f28;
-  --field: #ffb000; --on-field: #080908; --accent: #ffb000;
+  --field: #ffb000; --on-field: #080908; --accent: #ffb000; --live: #ffb000;
   --ok: #7bd88f; --warn: #ffb000; --bad: #ff6b5e;
   --r-sheet: 2px; --r-card: 2px; --r-ctl: 2px;
   --f-ui: var(--mono); --f-chrome: var(--mono); --f-prose: var(--mono);
@@ -568,7 +634,7 @@ body[data-pg="dark"] .host { box-shadow: 0 0 0 1px rgba(255,255,255,.07), 0 16px
 .app[data-k="phosphor"][data-m="light"] {
   --ground: #e7e6dc; --sheet: #f5f4ec; --recess: #eceades;
   --ink: #23241f; --muted: #5a5c52; --faint: #8b8d81; --line: #dbdacd; --line2: #c4c3b4;
-  --field: #23241f; --on-field: #f5f4ec; --accent: #a35b00;
+  --field: #23241f; --on-field: #f5f4ec; --accent: #a35b00; --live: #a35b00;
   --syn-k: #a35b00; --syn-s: #2f6b46; --syn-f: #23241f; --syn-n: #8a4b12; --syn-c: #b0af9f; --syn-o: #45463d;
   --term-bg: #23241f; --term-fg: #f5f4ec;
   --elev: 0 0 0 1px #dbdacd; --elev-float: 0 0 0 1px #dbdacd, 0 8px 20px rgba(35,36,31,.08);

@@ -132,9 +132,12 @@ function diffFrame(node, bare) {
   const f = el("div", "codeframe");
   if (!bare) f.append(el("div", "cf-bar", `<span class="cf-name">${esc(node.title)}</span><button class="cf-act">复制</button>`));
   const code = el("pre", "code");
+  let changed = 0;
   node.diff.forEach((r) => {
     const cls = r.op === "+" ? "add" : r.op === "-" ? "del" : "";
-    code.append(el("div", `ln dl ${cls}`, `<span class="no">${r.op.trim()}</span><span class="tx">${hl(r.text)}</span>`));
+    const row = el("div", `ln dl ${cls}`, `<span class="no">${r.op.trim()}</span><span class="tx">${hl(r.text)}</span>`);
+    if (cls) row.style.setProperty("--d", `${changed++ * 34}ms`);
+    code.append(row);
   });
   f.append(code);
   f.append(el("div", "dfoot", `└ ${node.meta}`));
@@ -151,6 +154,22 @@ function termFrame(node, bare) {
 }
 
 const frameFor = (n, bare) => (n.render === "diff" ? diffFrame(n, bare) : n.render === "terminal" ? termFrame(n, bare) : readFrame(n, bare));
+
+/** 工具跑的时候计时器是活的；停下来换成最终耗时，位置不变。 */
+function runClock(row, done) {
+  const slot = row.querySelector(".telapsed");
+  if (!slot) return () => {};
+  const t0 = performance.now();
+  const id = setInterval(() => {
+    slot.textContent = `${((performance.now() - t0) / 1000).toFixed(1)}s`;
+  }, 100);
+  return () => {
+    clearInterval(id);
+    slot.textContent = done;
+    slot.classList.remove("telapsed");
+    slot.classList.add("tmeta");
+  };
+}
 
 async function printTerm(root, node, alive) {
   const t = root?.querySelector(".term");
@@ -227,7 +246,9 @@ function nodeEl(node, struct) {
 
   const n = el("div", "node tool run");
   const head = el("button", "tool-h");
-  head.innerHTML = `<span class="tname">${node.tool}</span><span class="ttitle">${esc(node.title)}</span><span class="tmeta">${esc(node.meta)}</span><span class="tstate"></span>`;
+  head.innerHTML =
+    `<span class="tname">${node.tool}</span><span class="ttitle">${esc(node.title)}</span>` +
+    `<span class="tpeek">详情 →</span><span class="telapsed">0.0s</span><span class="tstate"></span>`;
   n.append(head);
   if (struct !== "bench") {
     const body = el("div", "tool-b");
@@ -400,8 +421,8 @@ function composerStack(skin, scene) {
       "crow2",
       `<span class="cchips"><button class="chip">访问 · ${SESSION.accessLabel}</button><button class="chip">计划 · 关</button>` +
         `<button class="chip">${SESSION.model} · ${SESSION.effort}</button></span>` +
-        `<span class="ringwrap"><span class="ring" style="background:conic-gradient(var(--field) 0 ${pct}%, var(--line2) ${pct}% 100%)"></span>${pct}%</span>` +
-        `<button class="send">↑</button>`
+        `<span class="ringwrap"><span class="ring" data-pct="${pct}"></span>${pct}%</span>` +
+        `<button class="send" aria-label="发送"><i></i></button>`
     )
   );
   wrap.append(c, el("div", "slash"));
@@ -483,28 +504,40 @@ async function play(app) {
   const token = {};
   runs.set(app, token);
   const alive = () => runs.get(app) === token && app.isConnected;
+
+  // 环从 0 走到实际占用，只在挂载时走一次。
+  const ring = app.querySelector(".ring");
+  if (ring) requestAnimationFrame(() => ring.style.setProperty("--pct", `${ring.dataset.pct}%`));
+
   const flow = app.querySelector(".flow");
   if (!flow || app.dataset.scene === "hero" || app.querySelector(".led")) return;
   flow.replaceChildren();
 
   const struct = app.dataset.s;
   const stop = app.dataset.scene === "approval" ? NODES.findIndex((n) => n.kind === "approval") : NODES.length;
+  app.dataset.run = "1";
 
   for (let i = 0; i < stop; i += 1) {
     if (!alive()) return;
     const node = NODES[i];
+    if (node.kind === "user") flow.append(el("div", "turnsep", `<span>轮 ${SESSION.stats.turns}</span>`));
     const n = nodeEl(node, struct);
     if (!n) continue;
+    // 上一段的流式光标随下一个节点出现而收掉
+    flow.querySelectorAll(".caret").forEach((c) => c.remove());
     n.classList.add("enter");
     flow.append(n);
+    if (node.kind === "assistant" && node.text) n.querySelector("p:last-of-type")?.append(el("i", "caret"));
     flow.scrollTop = flow.scrollHeight;
     if (node.kind === "tool") {
+      const settle = runClock(n, node.meta);
       await wait(node.ms);
       if (!alive()) return;
       if (node.render === "terminal" && struct !== "bench") {
         n.classList.add("open");
         await printTerm(n.querySelector(".tool-b"), node, alive);
       }
+      settle();
       n.classList.remove("run");
       n.classList.add("ok");
       if (struct !== "bench" && node.render === "diff") n.classList.add("open");
@@ -513,12 +546,16 @@ async function play(app) {
     }
     flow.scrollTop = flow.scrollHeight;
   }
+  flow.querySelectorAll(".caret").forEach((c) => c.remove());
   if (app.dataset.scene === "approval") {
+    // 审批场景停在「bash 正在等你」那一刻：工具还亮着，发送键仍是停止态。
     const last = flow.querySelector(".tool:last-of-type");
     if (last) {
       last.classList.remove("ok");
       last.classList.add("run");
     }
+  } else {
+    delete app.dataset.run;
   }
 }
 
