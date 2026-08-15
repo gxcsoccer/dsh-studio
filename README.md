@@ -81,6 +81,7 @@ DeepSeek 的设计是 **「一切皆插件」**（Everything is a plugin），�
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 分层、`studio` profile、官方扩展点
 - [docs/product.md](./docs/product.md) — 首次运行、空状态、无障碍、签名、为何 v1 不做 App Sandbox
 - [docs/theming.md](./docs/theming.md) — 语义 token 与 WKWebView CSS 变量
+- [playground/](./playground/) — 视觉 / 交互方向现场（纸面家族，对齐 Notion Dev，不是命令面板 HUD）
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — 插件优先，不要去 clone 上游
 
 ## 许可 / License

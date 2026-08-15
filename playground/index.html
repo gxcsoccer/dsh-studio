@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DSH Studio · 设计 Playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./playground.css" />
+</head>
+<body>
+  <div class="pg">
+    <header class="pg-top">
+      <div class="pg-brand">
+        <span class="pg-mark" aria-hidden="true"></span>
+        <div>
+          <strong>DSH Studio</strong>
+          <span>设计现场 · 对齐 Notion Dev 的纸面，不走命令面板 HUD</span>
+        </div>
+      </div>
+      <div class="pg-top-actions">
+        <button type="button" class="pg-ghost" data-action="compare">对比</button>
+        <a class="pg-ghost" href="./README.md">怎么看</a>
+      </div>
+    </header>
+
+    <aside class="pg-styles" aria-label="风格"></aside>
+
+    <main class="pg-main">
+      <div class="pg-toolbar">
+        <div class="pg-scenes" role="tablist" aria-label="场景">
+          <button type="button" class="is-on" data-scene="session">会话</button>
+          <button type="button" data-scene="first">首次运行</button>
+          <button type="button" data-scene="empty">空工作区</button>
+          <button type="button" data-scene="error">失败</button>
+        </div>
+        <p class="pg-hint">1–5 换风格 · QWER 换场景 · / 或 ⌘K 打开插入 · C 对比</p>
+      </div>
+      <div class="pg-windows" data-compare="false">
+        <figure class="pg-frame is-focus" data-win="a">
+          <figcaption>A</figcaption>
+          <div class="pg-host" id="host-a"></div>
+        </figure>
+        <figure class="pg-frame" data-win="b" hidden>
+          <figcaption>B</figcaption>
+          <div class="pg-host" id="host-b"></div>
+        </figure>
+      </div>
+    </main>
+
+    <aside class="pg-notes" aria-live="polite"></aside>
+  </div>
+
+  <template id="mac-template">
+    <div class="mac" data-style="paper" data-scene="session" tabindex="0">
+      <div class="wash" aria-hidden="true"></div>
+      <header class="chrome">
+        <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="chrome-id">
+          <span class="wordmark">DSH Studio</span>
+          <span class="path">~/projj/github.com/gxcsoccer/dsh-studio</span>
+        </div>
+        <div class="chrome-actions">
+          <button type="button" class="btn">工作区</button>
+          <button type="button" class="btn btn-primary">重启</button>
+        </div>
+      </header>
+
+      <div class="shell">
+        <aside class="rail">
+          <div class="rail-search" data-open-palette>
+            <span>搜索</span>
+            <kbd>/</kbd>
+          </div>
+          <p class="kicker">工作区</p>
+          <button type="button" class="ws is-on">
+            <span class="ws-mark">ds</span>
+            <span class="ws-copy">
+              <strong>dsh-studio</strong>
+              <small>gxcsoccer / desktop</small>
+            </span>
+          </button>
+          <p class="kicker">会话</p>
+          <ul class="pages">
+            <li class="is-on"><span class="page-ico"></span>原生 chrome 手感</li>
+            <li><span class="page-ico"></span>主题 token 热更新</li>
+            <li><span class="page-ico"></span>首次运行检查</li>
+          </ul>
+          <p class="kicker">最近</p>
+          <ul class="recents">
+            <li>harness-docs</li>
+            <li>studio-plugin</li>
+          </ul>
+          <div class="rail-foot">官方默认能力 · 一层 bundle</div>
+        </aside>
+
+        <section class="canvas">
+          <article class="scene scene-session">
+            <header class="page-head">
+              <p class="kicker">会话</p>
+              <h1>把桌面本身做成一等公民</h1>
+              <p class="lede">窗口、钥匙串、通知、文件对话框是产品表面，不是浏览器权限条。运行时仍是官方 <code>dsh</code>。</p>
+            </header>
+
+            <div class="thread">
+              <div class="block user">
+                <span class="handle" aria-hidden="true"></span>
+                <p>把侧栏做成工作区书签，会话跟着文件夹走。不要再让人先开一个 URL。</p>
+              </div>
+
+              <div class="block agent">
+                <span class="handle" aria-hidden="true"></span>
+                <p>侧栏现在是工作区卡 + 最近列表。会话仍以 <code>session/event</code> 为准，原生端不另存一份权威记录。</p>
+              </div>
+
+              <details class="block tool is-open">
+                <summary>
+                  <span class="handle" aria-hidden="true"></span>
+                  <span class="tool-label">读取</span>
+                  <span class="tool-file">ThemeStore.swift</span>
+                  <span class="tool-crumb">tools → read</span>
+                </summary>
+                <div class="code-card">
+                  <header>
+                    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span>ThemeStore.swift</span>
+                    <span class="crumb">120 行</span>
+                  </header>
+                  <pre><code>func select(themeId: String) {
+    self.themeId = themeId
+    persist()
+    Task { await pushToBridge() }
+}</code></pre>
+                </div>
+              </details>
+
+              <div class="block agent">
+                <span class="handle" aria-hidden="true"></span>
+                <p>⌘K 不必做成 HUD。它可以是纸上的插入：切主题、打开文件夹、重启运行时，都从光标处长出来。</p>
+              </div>
+
+              <div class="chip-row" aria-label="事件">
+                <span class="chip event">session/event</span>
+                <span class="chip action">写入钥匙串</span>
+                <span class="chip action">POST /theme</span>
+                <span class="chip event">agent/turn-end</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="scene scene-first">
+            <header class="page-head">
+              <p class="kicker">第一次打开</p>
+              <h1>先把运行时<em>装好</em></h1>
+              <p class="lede">Studio 是官方 dsh 的原生宿主，不会内置 Node。缺什么，做一个动作，而不是读一篇 Cordis 教程。</p>
+            </header>
+            <ul class="checks">
+              <li class="ok">
+                <strong>Node.js 22.19+</strong>
+                <span>v22.19.0</span>
+              </li>
+              <li class="ok">
+                <strong>dsh 或 npx</strong>
+                <span>可用 npx 调用官方包</span>
+              </li>
+              <li class="warn">
+                <strong>API 密钥</strong>
+                <span>可稍后 · 钥匙串，不进仓库</span>
+              </li>
+            </ul>
+            <div class="cta-row">
+              <button type="button" class="btn btn-primary">重新检查</button>
+              <button type="button" class="btn">仍要启动</button>
+            </div>
+          </article>
+
+          <article class="scene scene-empty">
+            <header class="page-head">
+              <p class="kicker">工作区</p>
+              <h1>还没有项目<em>落在</em> Studio 里</h1>
+              <p class="lede">打开一个文件夹，会话会跟着这个工作区走。最近用过的也会出现在侧栏。</p>
+            </header>
+            <div class="drop">
+              <strong>把文件夹放这里</strong>
+              <span>或从最近的选</span>
+            </div>
+            <div class="cta-row">
+              <button type="button" class="btn btn-primary">打开文件夹</button>
+              <button type="button" class="btn">从最近选择</button>
+            </div>
+          </article>
+
+          <article class="scene scene-error">
+            <header class="page-head">
+              <p class="kicker">运行时</p>
+              <h1>运行时没有<em>起来</em></h1>
+              <p class="lede">可以重启，或修复 studio profile。预览版上游会破，旧日志只读。</p>
+            </header>
+            <div class="code-card error-log">
+              <header>
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>runtime.log</span>
+                <span class="crumb">failed</span>
+              </header>
+              <pre><code>bridge 43180 refused
+profile studio: missing bundle dsh-studio</code></pre>
+            </div>
+            <div class="cta-row">
+              <button type="button" class="btn btn-primary">重启运行时</button>
+              <button type="button" class="btn">修复 Profile</button>
+            </div>
+          </article>
+
+          <footer class="dock">
+            <div class="composer">
+              <span class="slash" aria-hidden="true">/</span>
+              <textarea rows="1" placeholder="写给 Agent，或输入 / 插入" aria-label="写给 Agent"></textarea>
+              <button type="button" class="btn btn-primary send">发送</button>
+            </div>
+            <div class="slash-menu" hidden>
+              <button type="button"><strong>新会话</strong><span>在这个工作区开一页</span></button>
+              <button type="button"><strong>打开工作区</strong><span>⌘O</span></button>
+              <button type="button"><strong>切换主题</strong><span>热更新 token</span></button>
+              <button type="button"><strong>重启运行时</strong><span>⇧⌘R</span></button>
+            </div>
+          </footer>
+        </section>
+
+        <aside class="lens">
+          <p class="kicker">属性</p>
+          <dl class="props">
+            <div><dt>阶段</dt><dd>已就绪</dd></div>
+            <div><dt>桥</dt><dd>127.0.0.1:43180</dd></div>
+            <div><dt>Profile</dt><dd>studio</dd></div>
+            <div><dt>密钥</dt><dd>钥匙串</dd></div>
+            <div><dt>主题</dt><dd class="theme-name">Paper</dd></div>
+          </dl>
+          <p class="kicker">插件层</p>
+          <ul class="layers">
+            <li class="layer-a"><span>1</span>@deepseek-ai/dsh-base</li>
+            <li class="layer-b"><span>2</span>dsh-studio bundle</li>
+            <li class="layer-c"><span>3</span>profile patch</li>
+          </ul>
+          <div class="stage-panel">
+            <p class="kicker">舞台</p>
+            <div class="code-card">
+              <header>
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>pushToBridge.ts</span>
+                <span class="crumb">Workers → theme</span>
+              </header>
+              <pre><code>POST /theme
+{ themeId, tokens }</code></pre>
+            </div>
+            <div class="chip-row">
+              <span class="chip event">PR 已就绪</span>
+              <span class="chip action">热更新</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <footer class="status">
+        <span class="dot"></span>
+        <span>已就绪 · 官方运行时</span>
+        <span class="ports">3080 · 43180</span>
+      </footer>
+
+      <div class="palette" hidden>
+        <div class="palette-card">
+          <input type="search" placeholder="搜索命令或插入块…" />
+          <ul>
+            <li class="is-on"><strong>打开工作区</strong><span>⌘O</span></li>
+            <li><strong>重启运行时</strong><span>⇧⌘R</span></li>
+            <li><strong>修复 Profile</strong><span>studio</span></li>
+            <li><strong>切换侧栏</strong><span>⌥⌘S</span></li>
+            <li><strong>主题：Paper</strong><span>暖纸</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script src="./playground.js"></script>
+</body>
+</html>
