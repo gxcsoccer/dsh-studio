@@ -1,0 +1,60 @@
+{
+  "id": "studio-light",
+  "name": "Studio Light",
+  "nameZh": "Studio 浅色",
+  "appearance": "light",
+  "tokens": {
+    "background": "#F7F6F3",
+    "surface": "#FFFFFF",
+    "elevated": "#FFFFFF",
+    "text": {
+      "primary": "#1C1C1A",
+      "secondary": "#6F6E69",
+      "tertiary": "#9B9A97"
+    },
+    "border": {
+      "subtle": "#E8E6E1",
+      "strong": "#C9C7C0"
+    },
+    "accent": "#B07D4F",
+    "danger": "#C62828",
+    "warning": "#B45309",
+    "success": "#1B7F4E",
+    "overlay": "rgba(20,18,14,0.40)",
+    "focusRing": "#B07D4F",
+    "radius": {
+      "sm": 6,
+      "md": 10,
+      "lg": 14,
+      "xl": 20
+    },
+    "space": {
+      "1": 4,
+      "2": 8,
+      "3": 12,
+      "4": 16,
+      "5": 24,
+      "6": 32,
+      "7": 40,
+      "8": 56
+    },
+    "type": {
+      "xs": 11,
+      "sm": 12,
+      "md": 13,
+      "lg": 15,
+      "xl": 18,
+      "display": 28
+    },
+    "shadow": {
+      "sm": "0 1px 2px rgba(28,28,26,0.06)",
+      "md": "0 8px 24px rgba(28,28,26,0.08)",
+      "lg": "0 16px 48px rgba(28,28,26,0.10)"
+    },
+    "motion": {
+      "fast": 120,
+      "normal": 200,
+      "slow": 320
+    }
+  }
+}

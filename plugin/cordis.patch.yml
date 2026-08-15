@@ -1,0 +1,12 @@
+# Bundle layer for the studio profile.
+# Inserted after @deepseek-ai/dsh-base (and typically @deepseek-ai/dsh-web-app).
+# Override this row by id in $DSH_HOME/profiles/studio/cordis.patch.yml.
+# Patch replaces the whole config object — restate every key you keep.
+- insert:
+    - id: studio-bridge
+      name: dsh-studio
+      config:
+        bridgePort: 43180
+        bindHost: 127.0.0.1
+        notifyOnTurnEnd: true
+        themeId: system

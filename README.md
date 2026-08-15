@@ -74,12 +74,13 @@ DeepSeek 的设计是 **「一切皆插件」**（Everything is a plugin），�
 
 早期。DeepSeek Harness 仍是 **developer preview**，核心插件和 API **会有破坏性变更**。本仓库跟着官方已发布的扩展点走（`apply` / `inject` / `Config` / `ctx.effect` / `session/event` / `ctx.agents`），而不是锁死一份 fork。
 
-当前提交只包含宣言与架构。桌面应用实现由后续工作完成。
+已实现：`plugin/` Cordis bundle（127.0.0.1:43180 桥）、`themes/` 语义包、`app/` SwiftUI macOS 14+ 宿主（Package.swift 与 DSH.xcodeproj）。Linux CI 只构建 plugin，不在 Linux 上声称编出 .app。Mac 上打开 app/DSH.xcodeproj；首次运行会写入 studio profile 并启动 dsh --profile studio。菜单：打开工作区 / 重启运行时 / 修复 Profile。设置：主题、强调色、密度、字号。v1 无 App Sandbox。主题文档见 docs/theming.md。
 
 ## 文档 / Docs
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 分层、`studio` profile、官方扩展点
 - [docs/product.md](./docs/product.md) — 首次运行、空状态、无障碍、签名、为何 v1 不做 App Sandbox
+- [docs/theming.md](./docs/theming.md) — 语义 token 与 WKWebView CSS 变量
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — 插件优先，不要去 clone 上游
 
 ## 许可 / License
