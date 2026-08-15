@@ -1,741 +1,714 @@
-const STRUCTURES = [
+/**
+ * 四个方案渲染同一次会话。参照的是官方 web 客户端的真实表面：
+ * 三栏、Chat/Trajectory 双视图、审批接管输入栏、composer 底部一排
+ * 访问模式 / 计划 / 模型 / 上下文环、侧栏状态点分优先级。
+ */
+
+const VARIANTS = [
   {
-    id: "manuscript",
-    name: "Manuscript",
-    nameZh: "手稿",
-    tag: "编辑性最强",
-    swatch: ["#f6f5f4", "#ffb110", "#02093a"],
+    id: "web",
+    name: "Web reference",
+    zh: "官方 web",
+    tag: "参照",
     thesis:
-      "没有左侧栏。工作区是顶部的纸质书签，正文独占一栏，工具调用退到页边当批注——像书里的边注，不抢正文。标题按 60px 排，lede 用衬线。",
-    motion: "正文流式写出；页边批注在对应段落旁淡入，带一条细引线。",
-    cost: "页边在窄窗口会塌回正文下方。检查器要折进顶部书签。",
-    pick: "会话本身就是产物、要能读能引用的时候。最像「文档」，最不像 IDE。",
+      "官方 dsh web 今天的样子，用它自己的灰阶画的。放在这里是为了量差距——尤其是右边那栏：详情面板在已发布版本里有实现、有文案，但<b>没有入口</b>，点工具行打不开它。",
+    edge: "—",
+    cost: "—",
+    pick: "开对比模式，把它放 B 窗。",
   },
   {
-    id: "diptych",
-    name: "Diptych",
-    nameZh: "双联",
-    tag: "最像那一页",
-    swatch: ["#ffffff", "#fff4d4", "#02093a"],
+    id: "console",
+    name: "Console",
+    zh: "控制台",
+    tag: "最忠实",
     thesis:
-      "左文右台。左边永远是叙述，右边是整块色的舞台，工具在上面演：读文件是杏色，改代码是天蓝，跑命令是午夜蓝，要审批转珊瑚。色块随活动换，是状态本身。",
-    motion: "舞台整块换色 320ms，卡片贴着色块推上来；左边文字不动。",
-    cost: "宽度吃得多，1180 以下要把舞台压成抽屉。",
-    pick: "要 notion.com/product/dev 那种「文案 + 活的代码窗」的双联节奏。",
+      "同样的三栏，换成 dev-platform 的语言：一个色相、0 圆角、发丝线、等宽当 UI 字体、语法高亮走同色明度阶。桌面在这里补的是官方没接上的那条线——<b>详情面板真的能开</b>，点任意工具行就在右边展开输入 / 输出 / 计时。",
+    edge: "接通详情面板；审批可以给持久授权，不只是「允许一次」。",
+    cost: "结构最保守。它赢在密度和完成度，不赢在新鲜感。",
+    pick: "要一个能对着官方 UI 逐条说清「我们哪里更好」的版本。",
   },
   {
-    id: "blocks",
-    name: "Blocks",
-    nameZh: "块",
-    tag: "每天用",
-    swatch: ["#ffffff", "#e6f3fe", "#111111"],
+    id: "bench",
+    name: "Bench",
+    zh: "工作台",
+    tag: "偏工程",
     thesis:
-      "真正的块编辑器。悬停出句柄，/ 菜单从光标处长出来而不是屏幕中央，工具是能折叠的 callout，检查器是页面属性那一套小标签。",
-    motion: "块 160ms 就位；/ 菜单锚在光标的实际像素位置。",
-    cost: "最朴素。截图不出彩，但每天八小时不累。",
-    pick: "把 Studio 当工作区而不是展台。长期驻留、大量翻旧会话。",
+      "对话退回窄栏，右边是常驻工作台：当前 diff、终端、读到的文件都在那儿，跟着 agent 走。取的是那页「代码窗 + 焊在底边的终端条」那个部件，把它放大成一整栏。",
+    edge: "工具产物有固定位置，不用在流里往回翻。文件页签常驻。",
+    cost: "1180 以下要把工作台压成抽屉。窄屏是它的软肋。",
+    pick: "主要用途是看着 agent 改代码，而不是聊。",
   },
   {
-    id: "current",
-    name: "Current",
-    nameZh: "当前",
-    tag: "对照",
-    swatch: ["#0b0b0c", "#d4a574", "#131316"],
+    id: "ledger",
+    name: "Ledger",
+    zh: "账本",
+    tag: "偏观测",
     thesis:
-      "仓库里现在的样子。语义 token 是对的，但布局是三栏工具壳：会话挤在中间，工具调用没有位置，标题只有 22px。",
-    motion: "线性淡出 120ms。",
-    cost: "——",
-    pick: "只用来量差距。",
+      "把官方的 Trajectory 视图提成主表面。上面是按真实耗时投影的时间轴，下面是事件账本；带 ● 的是 surface 事件（会进模型上下文的只有 user/message、assistant/message、tool/result 三种）。聊天变成次要页签。",
+    edge: "长任务、跑飞了要复盘、要看 TTFT 和工具占比的时候，这是唯一能看的视图。",
+    cost: "不适合日常对话。要跟别的方案配着用，不是单独选。",
+    pick: "跑长任务、调 agent、排查为什么慢。",
   },
 ];
 
-const state = {
-  a: "diptych",
-  b: "manuscript",
-  scene: "session",
-  appearance: "day",
-  compare: false,
-  focus: "a",
-};
-
+const state = { a: "console", b: "web", scene: "session", look: "paper", cmp: false, focus: "a" };
 const hosts = { a: document.getElementById("host-a"), b: document.getElementById("host-b") };
-const players = new WeakMap();
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const timers = new WeakMap();
+const slow = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const byId = (id) => STRUCTURES.find((s) => s.id === id) || STRUCTURES[0];
-const wait = (ms) => new Promise((r) => setTimeout(r, reduceMotion ? Math.min(ms, 60) : ms));
-const el = (tag, cls, html) => {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (html != null) node.innerHTML = html;
-  return node;
-};
-const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const byId = (id) => VARIANTS.find((v) => v.id === id) || VARIANTS[1];
+const wait = (ms) => new Promise((r) => setTimeout(r, slow ? ms : 0));
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function el(tag, cls, html) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html != null) n.innerHTML = html;
+  return n;
+}
 
-const KEYWORDS =
-  /\b(func|let|var|if|else|return|struct|final|class|enum|await|async|import|self|guard|try|case|switch|private|public|static|extension|throws|in|for|while|true|false|nil|null|const|export|new|Task)\b/g;
+/* ————— 语法：四级明度阶 ————— */
+
+const KW = /\b(func|let|var|if|else|return|struct|final|class|enum|await|async|import|self|guard|try|case|switch|private|public|static|extension|throws|in|for|while|true|false|nil|Task)\b/g;
 
 function hl(line) {
-  const pieces = [];
+  const out = [];
   let rest = line;
   const re = /(\/\/[^\n]*|"(?:[^"\\]|\\.)*")/;
   let m;
   while ((m = re.exec(rest))) {
-    if (m.index > 0) pieces.push(["code", rest.slice(0, m.index)]);
-    pieces.push([m[0].startsWith("//") ? "cm" : "str", m[0]]);
+    if (m.index > 0) out.push(["o", rest.slice(0, m.index)]);
+    out.push([m[0].startsWith("//") ? "c" : "s", m[0]]);
     rest = rest.slice(m.index + m[0].length);
   }
-  pieces.push(["code", rest]);
-  return pieces
-    .map(([kind, value]) => {
-      const safe = esc(value);
-      if (kind !== "code") return `<i class="${kind}">${safe}</i>`;
-      return safe
-        .replace(KEYWORDS, '<i class="kw">$1</i>')
-        .replace(/\b([A-Z][A-Za-z0-9_]+)\b/g, '<i class="ty">$1</i>')
-        .replace(/\b(\d+(?:\.\d+)?)\b/g, '<i class="nm">$1</i>');
+  out.push(["o", rest]);
+  return out
+    .map(([kind, v]) => {
+      const t = esc(v);
+      if (kind !== "o") return `<i class="${kind}">${t}</i>`;
+      return t
+        .replace(KW, '<i class="k">$1</i>')
+        .replace(/\b([A-Z][A-Za-z0-9_]+)\b/g, '<i class="f">$1</i>')
+        .replace(/\b(\d+(?:\.\d+)?)\b/g, '<i class="n">$1</i>');
     })
     .join("");
 }
 
-function codeWindow({ file, lang, range, code, diff, added, removed }) {
-  const card = el("div", "codewin");
-  const head = el("header");
-  head.append(
-    el("span", "fname", esc(file)),
-    el("span", "lang", lang || ""),
-    el("span", "meta", diff ? `+${added} −${removed}` : range ? `${range} 行` : "")
-  );
-  card.append(head);
-  const body = el("div", "cbody");
-  const rows = diff
-    ? diff.map((row, i) => {
-        const line = el("div", `crow op${row.op === "+" ? "add" : row.op === "-" ? "del" : "ctx"}`);
-        line.append(el("span", "gut", row.op === " " ? String(i + 1) : row.op), el("code", null, hl(row.text)));
-        return line;
-      })
-    : code.map((text, i) => {
-        const line = el("div", "crow");
-        line.append(el("span", "gut", String(i + 1)), el("code", null, hl(text)));
-        return line;
-      });
-  rows.forEach((r) => body.append(r));
-  card.append(body);
-  return card;
-}
+/* ————— 代码框 ————— */
 
-function terminalWindow({ cmd, out, ok }) {
-  const card = el("div", "codewin term");
-  const head = el("header");
-  head.append(el("span", "fname", "zsh"), el("span", "meta", ok ? "exit 0" : "exit 1"));
-  card.append(head);
-  const body = el("div", "cbody");
-  body.append(el("div", "crow", `<span class="gut">$</span><code><i class="cmd">${esc(cmd)}</i></code>`));
-  out.forEach((line) => body.append(el("div", "crow", `<span class="gut"></span><code class="dim">${esc(line)}</code>`)));
-  card.append(body);
-  return card;
-}
-
-const ACTIVITY = {
-  think: { tint: "midnight", label: "思考" },
-  read: { tint: "gold", label: "读取" },
-  edit: { tint: "sky", label: "编辑" },
-  run: { tint: "midnight", label: "运行" },
-  approve: { tint: "coral", label: "待批准" },
-};
-
-/** 工具在正文里是完整卡片，还是压成一行、把内容让给别处（页边 / 舞台）。 */
-const TRACE_LAYOUT = { manuscript: true, diptych: true, blocks: false, current: false };
-
-function traceSummary(item) {
-  if (item.kind === "edit") return `${item.file}  +${item.added} −${item.removed}`;
-  if (item.kind === "read") return `${item.file}:${item.range}`;
-  if (item.kind === "run") return item.cmd;
-  return item.title || `${item.lines.length} 条推理`;
-}
-
-/* ————— 结构骨架 ————— */
-
-function railMarkup(style) {
-  const rail = el("aside", "rail");
-  rail.append(el("button", "search", `<span>搜索会话</span><kbd>/</kbd>`));
-  rail.append(el("p", "kicker", "工作区"));
-  const ws = el("button", "ws is-on");
-  ws.innerHTML = `<span class="ws-mark">ds</span><span class="ws-copy"><strong>dsh-studio</strong><small>3 个会话 · 已恢复</small></span>`;
-  rail.append(ws);
-  rail.append(el("p", "kicker", "会话"));
-  const list = el("ul", "pages");
-  [
-    ["把侧栏做成工作区书签", "刚刚", true],
-    ["主题 token 热更新", "2 小时前", false],
-    ["首次运行检查文案", "昨天", false],
-  ].forEach(([title, when, on]) => {
-    const li = el("li", on ? "is-on" : "");
-    li.innerHTML = `<span class="page-ico"></span><span class="page-t">${title}</span><span class="page-w">${when}</span>`;
-    list.append(li);
-  });
-  rail.append(list);
-  rail.append(el("p", "kicker", "最近"));
-  const recents = el("ul", "recents");
-  ["harness-docs", "studio-plugin"].forEach((r) => recents.append(el("li", null, r)));
-  rail.append(recents);
-  rail.append(el("div", "rail-foot", "官方运行时 · base + 1 层"));
-  return rail;
-}
-
-function propsMarkup(style, scene) {
-  const lens = el("aside", "lens");
-  const phase = SCENES[scene].phase;
-  const tone = SCENES[scene].status[1];
-  if (style === "blocks") {
-    lens.append(el("p", "kicker", "页面属性"));
-    const props = el("div", "nprops");
-    [
-      ["阶段", phase, tone],
-      ["桥", tone === "bad" ? "未连接" : "127.0.0.1:43180", ""],
-      ["Profile", "studio", ""],
-      ["密钥", "钥匙串", "ok"],
-      ["工作区", "dsh-studio", ""],
-    ].forEach(([k, v, tone]) => {
-      const row = el("div", "nprop");
-      row.innerHTML = `<span class="pk">${k}</span><span class="pv ${tone}">${v}</span>`;
-      props.append(row);
-    });
-    lens.append(props);
-    lens.append(el("p", "kicker", "插件层"));
-    const layers = el("ul", "layers");
-    [
-      ["1", "@deepseek-ai/dsh-base", "gold"],
-      ["2", "dsh-studio bundle", "sky"],
-      ["3", "profile patch", "mocha"],
-    ].forEach(([n, name, tint]) => {
-      const li = el("li", `t-${tint}`);
-      li.innerHTML = `<span>${n}</span>${name}`;
-      layers.append(li);
-    });
-    lens.append(layers);
-    return lens;
+function readFrame(node, bare) {
+  const f = el("div", "codeframe");
+  if (!bare) {
+    f.append(
+      el("div", "cf-bar", `<span class="cf-name">${esc(node.title)}</span><button type="button" class="cf-act">复制</button>`)
+    );
   }
-  lens.append(el("p", "kicker", "检查器"));
-  const props = el("dl", "props");
-  [
-    ["阶段", phase],
-    ["桥", tone === "bad" ? "未连接" : "127.0.0.1:43180"],
-    ["Profile", "studio"],
-    ["密钥", "钥匙串"],
-  ].forEach(([k, v]) => {
-    const row = el("div");
-    row.innerHTML = `<dt>${k}</dt><dd>${v}</dd>`;
-    props.append(row);
+  const code = el("pre", "code");
+  node.code.forEach((line, i) => {
+    code.append(el("div", "ln", `<span class="no">${node.startLine + i}</span><span class="tx">${hl(line)}</span>`));
   });
-  lens.append(props);
-  lens.append(el("p", "kicker", "插件层"));
-  const layers = el("ul", "layers");
-  [
-    ["1", "@deepseek-ai/dsh-base", "gold"],
-    ["2", "dsh-studio bundle", "sky"],
-    ["3", "profile patch", "mocha"],
-  ].forEach(([n, name, tint]) => {
-    const li = el("li", `t-${tint}`);
-    li.innerHTML = `<span>${n}</span>${name}`;
-    layers.append(li);
+  f.append(code);
+  return f;
+}
+
+function diffFrame(node, bare) {
+  const f = el("div", "codeframe");
+  if (!bare) {
+    f.append(
+      el("div", "cf-bar", `<span class="cf-name">${esc(node.title)}</span><button type="button" class="cf-act">复制</button>`)
+    );
+  }
+  const code = el("pre", "code");
+  node.diff.forEach((row) => {
+    const cls = row.op === "+" ? "add" : row.op === "-" ? "del" : "";
+    code.append(el("div", `ln dl ${cls}`, `<span class="no">${row.op.trim() || ""}</span><span class="tx">${hl(row.text)}</span>`));
   });
-  lens.append(layers);
-  return lens;
+  f.append(code);
+  f.append(el("div", "dfoot", `└ ${node.meta}`));
+  return f;
 }
 
-function composerMarkup(style) {
-  const dock = el("div", "dock");
-  const composer = el("div", "composer");
-  composer.innerHTML = `
-    <textarea rows="1" placeholder="写给 Agent，或按 / 插入" aria-label="写给 Agent"></textarea>
-    <div class="composer-foot">
-      <span class="ctx"><i class="ctx-dot"></i>dsh-studio · 全部文件</span>
-      <button type="button" class="btn btn-primary send">发送 <kbd>⌘⏎</kbd></button>
-    </div>`;
-  dock.append(composer);
-  dock.append(el("div", "slash", ""));
-  return dock;
+function termFrame(node, bare) {
+  const f = el("div", "codeframe");
+  if (!bare) {
+    f.append(
+      el("div", "cf-bar", `<span class="cf-name">${esc(node.cwd)}</span><span class="tmeta">${esc(node.meta)}</span>`)
+    );
+  }
+  const t = el("pre", "term");
+  t.append(el("div", null, `<span class="pr">$ </span>${esc(node.cmd)}`));
+  f.append(t);
+  return f;
 }
 
-function pageHead(scene, style) {
-  const data = SCENES[scene];
-  const head = el("header", "page-head");
-  head.append(el("p", "kicker", data.kicker));
-  const h1 = el("h1");
-  h1.innerHTML = `${esc(data.title[0])}<em>${esc(data.title[1])}</em>`;
-  head.append(h1);
-  head.append(el("p", "lede", data.lede));
-  return head;
+function toolFrame(node, bare) {
+  if (node.render === "diff") return diffFrame(node, bare);
+  if (node.render === "terminal") return termFrame(node, bare);
+  return readFrame(node, bare);
 }
 
-function sceneExtras(scene) {
-  const data = SCENES[scene];
-  const wrap = el("div", "scene-extra");
-  if (data.checks) {
-    const list = el("ul", "checks");
-    data.checks.forEach((c) => {
-      const li = el("li", c.state);
-      li.innerHTML = `<span class="ck-mark"></span><span class="ck-copy"><strong>${c.title}</strong><small>${c.detail}</small></span>`;
+/** 终端逐行打印，进行中的那行走扫光——不用转圈。 */
+async function printTerm(frame, node, alive) {
+  const t = frame.querySelector(".term");
+  if (!t) return;
+  for (const line of node.out) {
+    if (!alive()) return;
+    const row = el("div", null, `<span class="dim shim">${esc(line)}</span>`);
+    t.append(row);
+    await wait(340);
+    if (!alive()) return;
+    row.querySelector("span").classList.remove("shim");
+  }
+}
+
+/* ————— 侧栏 ————— */
+
+function sidebar(scene) {
+  const s = el("aside", "side");
+  const top = el("div", "side-top");
+  top.append(el("button", "btn btn-primary", "＋ 新会话"), el("button", "btn btn-sm", "⌕"));
+  s.append(top);
+
+  WORKSPACES.forEach((ws) => {
+    const box = el("div", "ws");
+    box.append(
+      el("button", "ws-h", `<span class="caret">${ws.open ? "▾" : "▸"}</span><b>${ws.name}</b><em>${ws.sessions.length}</em>`)
+    );
+    if (!ws.open) return s.append(box);
+    const list = el("ul", "ses");
+    ws.sessions.forEach((se) => {
+      const current = se.state === "current";
+      // 审批场景里当前会话变成「等待审批」，琥珀点压过运行中
+      const dot = current ? (scene === "approval" ? "wait" : "running") : se.state === "current" ? "running" : se.state;
+      const li = el("li", current ? "cur" : "");
+      li.innerHTML = `<span class="sdot ${dot}"></span><span class="s-t">${se.title}</span><span class="s-when">${
+        current && scene === "approval" ? "待审批" : se.detail || se.when
+      }</span>`;
       list.append(li);
     });
-    wrap.append(list);
+    box.append(list);
+    s.append(box);
+  });
+
+  const foot = el("div", "side-foot");
+  foot.innerHTML = `<span>设置</span><span>·</span><span>插件 12</span>`;
+  s.append(foot);
+  return s;
+}
+
+/* ————— 节点流 ————— */
+
+function nodeEl(node, variant) {
+  if (node.kind === "user") {
+    const n = el("div", "node n-user");
+    n.innerHTML = `<div class="n-meta">你 · ${node.time}</div><p>${esc(node.text)}</p>`;
+    return n;
   }
-  if (scene === "empty") {
-    const drop = el("div", "drop");
-    drop.innerHTML = `<strong>把文件夹拖到这里</strong><small>或从最近的选一个</small>`;
-    wrap.append(drop);
+  if (node.kind === "assistant") {
+    const n = el("div", "node n-asst");
+    if (node.reasoning) {
+      const d = el("details", "think");
+      d.innerHTML = `<summary><span class="think-k">思考</span><span class="think-s">${esc(node.reasoning[0])}</span></summary>`;
+      const b = el("div", "think-body");
+      node.reasoning.forEach((line) => b.append(el("p", null, esc(line))));
+      d.append(b);
+      n.append(d);
+    }
+    if (node.text) n.append(el("p", null, esc(node.text)));
+    return n;
   }
-  if (data.log) {
-    wrap.append(terminalWindow({ cmd: "dsh --profile studio", out: data.log, ok: false }));
+  if (node.kind === "turn-tail") {
+    const n = el("div", "node tail");
+    n.innerHTML =
+      `<span>轮 ${node.turn} · ${node.ran}</span><span>TTFT ${node.ttft}</span><span>${node.tps} tok/s</span>` +
+      `<span class="files">${node.files.map((f) => `<i class="fpill">${f}</i>`).join("")}</span>`;
+    return n;
   }
-  if (data.actions) {
-    const row = el("div", "cta-row");
-    data.actions.forEach(([label, primary]) => {
-      row.append(el("button", `btn${primary ? " btn-primary" : ""}`, label));
+  if (node.kind === "approval") return null;
+
+  // 工具行。bench 把内容让给工作台，流里只留一行。
+  const n = el("div", "node tool run");
+  const head = el("button", "tool-h");
+  head.innerHTML =
+    `<span class="tname">${node.tool}</span><span class="ttitle">${esc(node.title)}</span>` +
+    `<span class="tmeta">${esc(node.meta)}</span><span class="tstate"></span>`;
+  n.append(head);
+  if (variant !== "bench") {
+    const body = el("div", "tool-b");
+    body.append(toolFrame(node, true));
+    n.append(body);
+    head.addEventListener("click", () => n.classList.toggle("open"));
+  }
+  n.dataset.tool = node.tool;
+  return n;
+}
+
+/* ————— 轨迹 ————— */
+
+const SPAN_TOTAL = 12400;
+
+function trajectory(onSelect) {
+  const wrap = el("div", "center");
+  const tl = el("div", "tl");
+  tl.append(el("div", "tl-h", `<b>概览</b><em>轮 3 · 12.4s · 拖选可筛，滚轮缩放</em>`));
+  const track = el("div", "tl-track");
+  LEDGER.forEach((row) => {
+    const who = row.who === "asst" ? "asst" : row.who === "tool" ? "tool" : row.type.startsWith("approval") ? "wait" : "";
+    // span 是 100ms 的倍数，按真实时长投影到时间轴上
+    const bar = el("div", `tl-bar ${who}`);
+    bar.style.left = `${(row.ms / SPAN_TOTAL) * 100}%`;
+    bar.style.width = `${Math.max(((row.span * 100) / SPAN_TOTAL) * 100, 0.8)}%`;
+    bar.style.top = `${row.who === "asst" ? 4 : row.who === "tool" ? 14 : 24}px`;
+    bar.title = `${row.type} · ${(row.ms / 1000).toFixed(1)}s`;
+    track.append(bar);
+  });
+  tl.append(track);
+  tl.append(el("div", "tl-ticks", `<span>0s</span><span>3s</span><span>6s</span><span>9s</span><span>12s</span>`));
+  wrap.append(tl);
+
+  const scroll = el("div", "flow");
+  scroll.style.padding = "0";
+  const table = el("table", "led");
+  table.innerHTML = `<thead><tr><th>#</th><th>事件</th><th>内容</th><th style="text-align:right">耗时</th></tr></thead>`;
+  const tb = el("tbody");
+  LEDGER.forEach((row, i) => {
+    const tr = el("tr", i === 8 ? "sel" : "");
+    tr.innerHTML =
+      `<td class="lq">${row.seq}</td>` +
+      `<td class="lt">${row.type}${row.surface ? '<span class="surf" title="surface 事件"></span>' : ""}</td>` +
+      `<td class="lc">${esc(row.text)}</td>` +
+      `<td class="lm">${(row.ms / 1000).toFixed(1)}s</td>`;
+    tr.addEventListener("click", () => {
+      tb.querySelectorAll("tr").forEach((n) => n.classList.remove("sel"));
+      tr.classList.add("sel");
+      onSelect?.(row);
     });
-    wrap.append(row);
-  }
+    tb.append(tr);
+  });
+  table.append(tb);
+  scroll.append(table);
+  wrap.append(scroll);
   return wrap;
 }
 
-function buildWindow(styleId, scene, appearance) {
-  const mac = el("div", "mac");
-  mac.dataset.style = styleId;
-  mac.dataset.scene = scene;
-  mac.dataset.appearance = styleId === "current" ? (appearance === "dusk" ? "dusk" : "day") : appearance;
-  mac.tabIndex = 0;
+/* ————— 右栏 ————— */
 
-  const chrome = el("header", "chrome");
-  chrome.innerHTML = `<div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>`;
-  if (styleId === "manuscript") {
-    const tabs = el("div", "tabs");
-    ["dsh-studio", "harness-docs", "+"].forEach((t, i) => {
-      tabs.append(el("button", `tab${i === 0 ? " is-on" : ""}${t === "+" ? " tab-add" : ""}`, t));
-    });
-    chrome.append(tabs);
-    chrome.append(el("div", "chrome-right", `<span class="live"><i></i>已就绪</span>`));
+function detailsRail(variant, scene) {
+  const r = el("aside", "rail");
+  r.append(el("div", "rail-h", `<b>详情</b><em>${variant === "web" ? "无入口" : "read · 42–61"}</em>`));
+
+  if (variant === "web") {
+    const e = el("div", "empty");
+    e.innerHTML =
+      `<p>点消息流里的工具行查看详情。</p>` +
+      `<p class="deadnote">openDetails 已实现但无人调用<br />这一栏在发布版里打不开</p>`;
+    r.append(e);
+    return r;
+  }
+
+  const s1 = el("div", "sect");
+  s1.append(el("h4", null, "输入"));
+  s1.append(
+    el(
+      "dl",
+      "kv",
+      `<dt>tool</dt><dd class="mono">read</dd>` +
+        `<dt>path</dt><dd class="mono">app/…/WorkspaceStore.swift</dd>` +
+        `<dt>range</dt><dd class="mono">42–61</dd>`
+    )
+  );
+  r.append(s1);
+
+  const s2 = el("div", "sect");
+  s2.append(el("h4", null, "输出"));
+  const f = readFrame(NODES[2], true);
+  f.querySelector(".code").style.maxHeight = "168px";
+  s2.append(f);
+  r.append(s2);
+
+  const s3 = el("div", "sect");
+  s3.append(el("h4", null, "计时"));
+  s3.append(
+    el("dl", "kv", `<dt>排队</dt><dd class="mono">12ms</dd><dt>执行</dt><dd class="mono">688ms</dd><dt>token</dt><dd class="mono">1,204</dd>`)
+  );
+  r.append(s3);
+
+  const s4 = el("div", "sect");
+  s4.append(el("h4", null, "会话"));
+  s4.append(
+    el(
+      "dl",
+      "kv",
+      `<dt>模式</dt><dd>${SESSION.preset}</dd>` +
+        `<dt>访问</dt><dd>${scene === "approval" ? "workspace-write" : SESSION.accessLabel}</dd>` +
+        `<dt>profile</dt><dd class="mono">studio</dd>` +
+        `<dt>桥</dt><dd class="mono">127.0.0.1:43180</dd>`
+    )
+  );
+  r.append(s4);
+  return r;
+}
+
+function benchRail(scene) {
+  const b = el("aside", "bench");
+  const edit = NODES[3];
+  const term = NODES[4];
+  b.append(el("div", "bench-h", `<span class="tname">edit</span><b>${edit.title}</b><span class="tmeta">${edit.meta}</span>`));
+  b.append(el("div", "bench-tabs", `<button class="on">WorkspaceStore.swift</button><button>SidebarSlot.swift</button><button>终端</button>`));
+  const body = el("div", "bench-b");
+  body.append(diffFrame(edit, true));
+  b.append(body);
+  const bot = el("div", "bench-t");
+  bot.append(termFrame(term, false));
+  const t = bot.querySelector(".term");
+  term.out.forEach((line) => t.append(el("div", null, `<span class="dim">${esc(line)}</span>`)));
+  b.append(bot);
+  return b;
+}
+
+function ledgerRail() {
+  const r = el("aside", "rail");
+  r.append(el("div", "rail-h", `<b>记录</b><em>#132</em>`));
+  const s1 = el("div", "sect");
+  s1.append(el("h4", null, "tool/call"));
+  s1.append(el("dl", "kv", `<dt>tool</dt><dd class="mono">bash</dd><dt>轮/步</dt><dd class="mono">3 / 2</dd><dt>surface</dt><dd class="mono">否</dd>`));
+  r.append(s1);
+  const s2 = el("div", "sect");
+  s2.append(el("h4", null, "输入"));
+  s2.append(el("pre", "code", `<div class="ln"><span class="tx">${hl('"swift build --package-path app"')}</span></div>`));
+  r.append(s2);
+  const s3 = el("div", "sect");
+  s3.append(el("h4", null, "计时"));
+  s3.append(el("dl", "kv", `<dt>开始</dt><dd class="mono">5.40s</dd><dt>时长</dt><dd class="mono">4.21s</dd><dt>等审批</dt><dd class="mono">2.40s</dd>`));
+  r.append(s3);
+  const s4 = el("div", "sect");
+  s4.append(el("h4", null, "本轮统计"));
+  s4.append(
+    el("dl", "kv", `<dt>轮 · 步</dt><dd class="mono">3 · 7</dd><dt>LLM</dt><dd class="mono">${SESSION.stats.llm}</dd><dt>工具</dt><dd class="mono">${SESSION.stats.tools}</dd><dt>缓存命中</dt><dd class="mono">${SESSION.stats.cache}%</dd>`)
+  );
+  r.append(s4);
+  return r;
+}
+
+/* ————— composer ————— */
+
+function composerStack(variant, scene) {
+  const dock = el("div", "dock");
+
+  const st = SESSION.stats;
+  dock.append(
+    el(
+      "div",
+      "strip",
+      `<span>${st.turns} 轮 · ${st.steps} 步</span><span class="sep">·</span><span>LLM ${st.llm}</span>` +
+        `<span class="sep">·</span><span>工具 ${st.tools}</span><span class="sep">·</span><span>首 token ${st.ttft}</span>` +
+        `<span class="sep">·</span><span>${st.tps} tok/s</span><span class="sep">·</span><span>缓存 ${st.cache}%</span>`
+    )
+  );
+
+  const todos = el("div", "todos");
+  todos.append(el("span", "tk", "任务"));
+  TODOS.forEach((t) => {
+    todos.append(el("span", `todo ${t.done ? "done" : ""} ${t.active ? "now" : ""}`, `<b></b>${t.text}`));
+  });
+  dock.append(todos);
+
+  const wrap = el("div", "cwrap");
+
+  if (scene === "approval") {
+    const ap = NODES.find((n) => n.kind === "approval");
+    const panel = el("div", "approve");
+    panel.innerHTML =
+      `<div class="ap-top"><span class="ap-k">等待审批</span><span class="ap-r">${esc(ap.reason)}</span></div>` +
+      `<div class="ap-cmd">${esc(ap.command)}</div>` +
+      `<div class="ap-note">${esc(ap.note)}</div>`;
+    const btns = el("div", "ap-btns");
+    btns.append(el("button", "btn btn-primary", "允许一次"), el("button", "btn", "拒绝"));
+    if (variant !== "web") {
+      // 官方 web 只有 allow-once / reject，没有持久授权。桌面补这一格。
+      const grant = el("label", "ap-grant");
+      grant.innerHTML = `<input type="checkbox" />本会话内记住 bash`;
+      btns.append(grant);
+    }
+    panel.append(btns);
+    wrap.append(panel);
+    dock.append(wrap);
+    return dock;
+  }
+
+  const c = el("div", "composer");
+  c.innerHTML =
+    `<div class="crow1"><button type="button" class="plus">+</button>` +
+    `<textarea rows="1" placeholder="给智能体写点什么，或按 / 唤起命令" aria-label="输入"></textarea></div>`;
+  const row2 = el("div", "crow2");
+  const pct = Math.round((SESSION.context.used / SESSION.context.capacity) * 100);
+  // 上下文环和发送键钉住右边；窄栏时先裁左边的 chip，不能裁发送。
+  row2.innerHTML =
+    `<span class="cchips">` +
+    `<button type="button" class="chip">访问 · ${SESSION.accessLabel}</button>` +
+    `<button type="button" class="chip">计划 · 关</button>` +
+    `<button type="button" class="chip">${SESSION.model} · ${SESSION.effort}</button>` +
+    `</span>` +
+    `<span class="ringwrap"><span class="ring" style="background:conic-gradient(var(--field) 0 ${pct}%, var(--line) ${pct}% 100%)"></span>${pct}%</span>` +
+    `<button type="button" class="send">↑</button>`;
+  c.append(row2);
+  wrap.append(c);
+  wrap.append(el("div", "slash"));
+  dock.append(wrap);
+  return dock;
+}
+
+/* ————— 组装 ————— */
+
+function buildApp(variant, scene, look) {
+  const app = el("div", "app");
+  app.dataset.v = variant;
+  app.dataset.scene = scene;
+
+  const tbar = el("header", "tbar");
+  tbar.innerHTML = `<div class="lights"><i></i><i></i><i></i></div><span class="wm">dsh-studio</span>`;
+  const mid = el("div", "tbar-mid");
+  mid.append(el("span", "tbar-path", SESSION.path));
+  tbar.append(mid);
+  const tr = el("div", "tbar-right");
+  tr.append(el("button", "btn btn-sm", "工作区"), el("button", "btn btn-sm btn-primary", "＋"));
+  tbar.append(tr);
+  app.append(tbar);
+
+  const body = el("div", "body3");
+  body.append(sidebar(scene));
+
+  const wantsTrajectory = scene === "trajectory" || variant === "ledger";
+
+  if (scene === "hero") {
+    const center = el("div", "center");
+    const hero = el("div", "hero");
+    hero.innerHTML =
+      `<span class="hero-badge">Preview</span>` +
+      `<h2>探索未至之境</h2>` +
+      `<p class="lede">选一个工作区就能开始。会话跟着文件夹走。</p>`;
+    const pick = el("button", "hero-pick", `<b>选择工作区</b><span>原生对话框 · 最近用过 4 个</span>`);
+    hero.append(pick);
+    center.append(hero);
+    center.append(composerStack(variant, scene));
+    body.append(center);
+  } else if (wantsTrajectory) {
+    const center = trajectory();
+    const head = el("div", "chead");
+    head.innerHTML = `<h1>${SESSION.title}</h1>`;
+    const tabs = el("div", "vtabs");
+    tabs.innerHTML = `<button>Chat</button><button class="on">Trajectory</button>`;
+    head.append(tabs);
+    center.prepend(head);
+    center.append(composerStack(variant, scene));
+    body.append(center);
   } else {
-    chrome.append(
-      el("div", "chrome-id", `<span class="wordmark">dsh-studio</span><span class="crumb">会话 · 把侧栏做成工作区书签</span>`)
-    );
-    const actions = el("div", "chrome-actions");
-    actions.append(el("button", "btn", "工作区"), el("button", "btn btn-primary", "新会话"));
-    chrome.append(actions);
-  }
-  mac.append(chrome);
-
-  const shell = el("div", "shell");
-  if (styleId !== "manuscript") shell.append(railMarkup(styleId));
-
-  const canvas = el("section", "canvas");
-  const scroll = el("div", "scroll");
-  scroll.append(pageHead(scene, styleId));
-  if (scene === "session") {
-    const thread = el("div", "thread");
-    scroll.append(thread);
-    if (styleId === "manuscript") scroll.append(el("div", "margin-rail"));
-  } else {
-    scroll.append(sceneExtras(scene));
-  }
-  canvas.append(scroll);
-  canvas.append(composerMarkup(styleId));
-  shell.append(canvas);
-
-  if (styleId === "diptych") {
-    const stage = el("aside", "stage");
-    stage.dataset.tint = "idle";
-    stage.innerHTML = `
-      <div class="stage-head"><span class="stage-label">舞台</span><span class="stage-sub">工具在这里演</span></div>
-      <div class="stage-body"></div>
-      <div class="stage-ask"></div>
-      <div class="stage-chips"></div>`;
-    shell.append(stage);
-  } else if (styleId !== "manuscript") {
-    shell.append(propsMarkup(styleId, scene));
+    const center = el("div", "center");
+    const head = el("div", "chead");
+    head.innerHTML = `<h1>${SESSION.title}</h1>`;
+    const tabs = el("div", "vtabs");
+    tabs.innerHTML = `<button class="on">Chat</button><button>Trajectory</button>`;
+    head.append(tabs, el("button", "btn btn-sm", "子智能体 2"), el("button", "btn btn-sm", "作业"));
+    center.append(head);
+    center.append(el("div", "flow"));
+    center.append(composerStack(variant, scene));
+    body.append(center);
   }
 
-  mac.append(shell);
+  if (variant === "bench") body.append(benchRail(scene));
+  else if (variant === "ledger") body.append(ledgerRail());
+  else body.append(detailsRail(variant, scene));
 
-  const [statusText, tone] = SCENES[scene].status;
-  if (styleId !== "manuscript") {
-    const status = el("footer", "status");
-    status.innerHTML = `<span class="dot t-${tone}"></span><span class="status-t">${statusText}</span><span class="ports">${
-      tone === "bad" ? "— · —" : "3080 · 43180"
-    }</span>`;
-    mac.append(status);
-  } else {
-    const live = mac.querySelector(".live");
-    if (live) live.innerHTML = `<i class="t-${tone}"></i>${statusText.split(" · ")[0]}`;
-  }
-  return mac;
+  app.append(body);
+
+  const sc = SCENES[scene];
+  const sbar = el("footer", "sbar");
+  sbar.innerHTML =
+    `<span class="dot ${sc.tone === "wait" ? "wait" : ""}"></span><span>${sc.status}</span>` +
+    `<span class="right"><span>${SESSION.preset}</span><span>3080 · 43180</span></span>`;
+  app.append(sbar);
+  return app;
 }
 
 /* ————— 播放 ————— */
 
-function marginNote(item) {
-  const note = el("aside", "mnote");
-  const meta = ACTIVITY[item.kind];
-  note.innerHTML = `<span class="mnote-k">${meta.label}</span>`;
-  if (item.kind === "read") note.append(el("code", null, `${item.file}:${item.range}`));
-  if (item.kind === "edit") note.append(el("code", null, `${item.file} +${item.added} −${item.removed}`));
-  if (item.kind === "run") note.append(el("code", null, item.cmd));
-  if (item.kind === "think") note.append(el("small", null, item.lines[0]));
-  return note;
-}
-
-function toolBlock(item, style) {
-  const meta = ACTIVITY[item.kind];
-  const block = el("div", `block tool t-${meta.tint}`);
-  const head = el("button", "tool-head");
-  head.innerHTML = `
-    <span class="handle" aria-hidden="true"></span>
-    <span class="tool-k">${meta.label}</span>
-    <span class="tool-n">${item.file || item.cmd || item.title || ""}</span>
-    <span class="tool-m">${
-      item.kind === "edit" ? `+${item.added} −${item.removed}` : item.kind === "read" ? `${item.range} 行` : ""
-    }</span>
-    <span class="spin" aria-hidden="true"></span>`;
-  block.append(head);
-  const body = el("div", "tool-body");
-  if (item.kind === "read") body.append(codeWindow(item));
-  if (item.kind === "edit") body.append(codeWindow(item));
-  if (item.kind === "run") body.append(terminalWindow(item));
-  if (item.kind === "think") {
-    const ul = el("ul", "think-list");
-    item.lines.forEach((l) => ul.append(el("li", null, l)));
-    body.append(ul);
-  }
-  block.append(body);
-  head.addEventListener("click", () => block.classList.toggle("is-open"));
-  return block;
-}
-
-function approvalBlock(item) {
-  const block = el("div", "block approve");
-  block.innerHTML = `
-    <div class="ap-copy">
-      <strong>${item.title}</strong>
-      <small>${item.detail}</small>
-    </div>
-    <div class="ap-row">
-      <button type="button" class="btn btn-primary">${item.accept}</button>
-      <button type="button" class="btn">${item.reject}</button>
-    </div>`;
-  block.querySelectorAll("button").forEach((b) =>
-    b.addEventListener("click", () => {
-      block.classList.add("is-done");
-      block.querySelector(".ap-row").replaceWith(el("span", "ap-done", b.classList.contains("btn-primary") ? "已允许" : "已跳过"));
-    })
-  );
-  return block;
-}
-
-async function typeInto(node, text, speed = 12) {
-  if (reduceMotion) {
-    node.textContent = text;
-    return;
-  }
-  node.textContent = "";
-  node.classList.add("typing");
-  for (let i = 0; i < text.length; i += 1) {
-    node.textContent += text[i];
-    if (i % 2 === 0) await wait(speed);
-  }
-  node.classList.remove("typing");
-}
-
-function stageCard(item) {
-  if (item.kind === "run") return terminalWindow(item);
-  if (item.kind === "think") {
-    const box = el("div", "stage-note");
-    item.lines.forEach((l) => box.append(el("p", null, l)));
-    return box;
-  }
-  return codeWindow(item);
-}
-
-function setStage(mac, item) {
-  const stage = mac.querySelector(".stage");
-  if (!stage) return;
-  const meta = ACTIVITY[item.kind];
-  if (!meta) return;
-  stage.dataset.tint = meta.tint;
-  stage.querySelector(".stage-label").textContent = meta.label;
-  stage.querySelector(".stage-sub").textContent = traceSummary(item);
-
-  const ask = stage.querySelector(".stage-ask");
-  // 批准的时候要还看得见它想改什么，所以卡片留在台上，问题停靠在下面。
-  if (item.kind === "approve") {
-    ask.replaceChildren();
-    ask.append(el("strong", null, item.title), el("p", null, item.detail));
-    const row = el("div", "ap-row");
-    row.append(el("button", "btn btn-primary", item.accept), el("button", "btn", item.reject));
-    row.querySelectorAll("button").forEach((b) =>
-      b.addEventListener("click", () =>
-        row.replaceWith(el("span", "ap-done", b.classList.contains("btn-primary") ? "已允许" : "已跳过"))
-      )
-    );
-    ask.append(row);
-    ask.classList.add("is-on");
-  } else {
-    ask.classList.remove("is-on");
-    ask.replaceChildren();
-    const card = stageCard(item);
-    card.classList.add("stage-card");
-    stage.querySelector(".stage-body").replaceChildren(card);
-  }
-
-  const chips = stage.querySelector(".stage-chips");
-  chips.append(el("span", "chip", item.kind === "approve" ? "agent/approval" : `session/event · ${item.kind}`));
-  while (chips.children.length > 3) chips.firstChild.remove();
-}
-
-async function play(mac) {
+async function play(app) {
   const token = {};
-  players.set(mac, token);
-  const alive = () => players.get(mac) === token && mac.isConnected;
-  const thread = mac.querySelector(".thread");
-  if (!thread) return;
-  thread.replaceChildren();
-  const marginRail = mac.querySelector(".margin-rail");
-  if (marginRail) marginRail.replaceChildren();
-  const stageBody = mac.querySelector(".stage-body");
-  if (stageBody) stageBody.replaceChildren();
-  const stageChips = mac.querySelector(".stage-chips");
-  if (stageChips) stageChips.replaceChildren();
+  timers.set(app, token);
+  const alive = () => timers.get(app) === token && app.isConnected;
+  const flow = app.querySelector(".flow");
+  if (!flow || app.dataset.scene === "hero") return;
+  if (app.querySelector(".led")) return;
+  flow.replaceChildren();
 
-  const style = mac.dataset.style;
-  const scroll = mac.querySelector(".scroll");
+  const variant = app.dataset.v;
+  const stopAt = app.dataset.scene === "approval" ? NODES.findIndex((n) => n.kind === "approval") : NODES.length;
 
-  for (const item of TRANSCRIPT) {
+  for (let i = 0; i < stopAt; i += 1) {
     if (!alive()) return;
-    await wait(reduceMotion ? 0 : 260);
-    if (!alive()) return;
+    const node = NODES[i];
+    const n = nodeEl(node, variant);
+    if (!n) continue;
+    n.classList.add("enter");
+    flow.append(n);
+    flow.scrollTop = flow.scrollHeight;
 
-    if (item.kind === "user") {
-      const block = el("div", "block user");
-      block.innerHTML = `<span class="handle" aria-hidden="true"></span><p></p>`;
-      thread.append(block);
-      requestAnimationFrame(() => block.classList.add("in"));
-      block.querySelector("p").textContent = item.text;
-      continue;
-    }
-
-    if (item.kind === "say") {
-      const block = el("div", "block say");
-      block.innerHTML = `<span class="handle" aria-hidden="true"></span><p></p>`;
-      thread.append(block);
-      requestAnimationFrame(() => block.classList.add("in"));
-      await typeInto(block.querySelector("p"), item.text);
-      continue;
-    }
-
-    setStage(mac, item);
-
-    // 审批在双联上是舞台的事；别处留在正文里，因为它需要被看见。
-    if (item.kind === "approve" && style !== "diptych") {
-      const block = approvalBlock(item);
-      thread.append(block);
-      requestAnimationFrame(() => block.classList.add("in"));
-      await wait(400);
-      if (scroll) scroll.scrollTop = scroll.scrollHeight;
-      continue;
-    }
-
-    if (TRACE_LAYOUT[style]) {
-      const line = el("div", "block trace");
-      line.innerHTML = `<span class="trace-k">${ACTIVITY[item.kind].label}</span><code>${esc(
-        traceSummary(item)
-      )}</code><span class="spin" aria-hidden="true"></span>`;
-      thread.append(line);
-      requestAnimationFrame(() => line.classList.add("in"));
-      if (style === "diptych") {
-        line.classList.add("clickable");
-        line.addEventListener("click", () => {
-          thread.querySelectorAll(".trace.is-on").forEach((n) => n.classList.remove("is-on"));
-          line.classList.add("is-on");
-          setStage(mac, item);
-        });
-      }
-      await wait(item.ms || 600);
+    if (node.kind === "tool") {
+      await wait(node.ms);
       if (!alive()) return;
-      line.classList.add("done");
-      if (marginRail) {
-        const note = marginNote(item);
-        const prev = marginRail.lastElementChild;
-        marginRail.append(note);
-        // 批注对齐它那一行，但不许压住上一条。
-        const floor = prev ? prev.offsetTop + prev.offsetHeight + 12 : 0;
-        note.style.setProperty("--top", `${Math.max(line.offsetTop, floor)}px`);
-        requestAnimationFrame(() => note.classList.add("in"));
+      if (node.render === "terminal" && variant !== "bench") {
+        n.classList.add("open");
+        await printTerm(n.querySelector(".tool-b"), node, alive);
       }
+      n.classList.remove("run");
+      n.classList.add("ok");
+      if (variant !== "bench" && node.render === "diff") n.classList.add("open");
     } else {
-      const block = toolBlock(item, style);
-      thread.append(block);
-      requestAnimationFrame(() => block.classList.add("in"));
-      await wait(item.ms || 600);
-      if (!alive()) return;
-      block.classList.add("done");
-      if (item.kind === "edit" || item.kind === "run") block.classList.add("is-open");
+      await wait(360);
     }
-    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+    flow.scrollTop = flow.scrollHeight;
+  }
+
+  // 审批场景：最后那次 bash 停在运行中，输入栏已经被审批面板接管
+  if (app.dataset.scene === "approval") {
+    const last = flow.querySelector(".tool:last-of-type");
+    if (last) {
+      last.classList.remove("ok");
+      last.classList.add("run");
+    }
   }
 }
 
 /* ————— / 菜单锚在光标 ————— */
 
-/** 光标在 .composer 坐标系里的像素位置。用一个同字体的镜像 div 量出来。 */
-function caretPoint(textarea) {
-  const composer = textarea.closest(".composer");
-  const cs = getComputedStyle(textarea);
-  const mirror = el("div", "caret-mirror");
+function caretXY(ta) {
+  const wrap = ta.closest(".cwrap");
+  const cs = getComputedStyle(ta);
+  const m = el("div", "mirror");
   ["fontSize", "fontFamily", "fontWeight", "lineHeight", "letterSpacing", "padding", "width"].forEach((p) => {
-    mirror.style[p] = cs[p];
+    m.style[p] = cs[p];
   });
-  mirror.style.left = `${textarea.offsetLeft}px`;
-  mirror.style.top = `${textarea.offsetTop}px`;
-  mirror.textContent = textarea.value.slice(0, textarea.selectionStart);
-  const marker = el("span", null, "\u200b");
-  mirror.append(marker);
-  composer.append(mirror);
-  const point = { x: marker.offsetLeft, y: marker.offsetTop + parseFloat(cs.lineHeight) || 20 };
-  mirror.remove();
-  return point;
+  const box = ta.getBoundingClientRect();
+  const ref = wrap.getBoundingClientRect();
+  m.style.left = `${box.left - ref.left}px`;
+  m.style.top = `${box.top - ref.top}px`;
+  m.textContent = ta.value.slice(0, ta.selectionStart);
+  const mark = el("span", null, "\u200b");
+  m.append(mark);
+  wrap.append(m);
+  const pt = { x: mark.offsetLeft, y: mark.offsetTop };
+  m.remove();
+  return pt;
 }
 
-function openSlash(mac, anchorToCaret) {
-  const menu = mac.querySelector(".slash");
-  const textarea = mac.querySelector("textarea");
+function openSlash(app, atCaret) {
+  const menu = app.querySelector(".slash");
+  const ta = app.querySelector("textarea");
+  if (!menu || !ta) return;
   menu.replaceChildren();
-  SLASH_ITEMS.forEach((item, i) => {
-    const btn = el("button", `${i === 0 ? "is-on" : ""} t-${item.tint}`);
-    btn.innerHTML = `<span class="s-dot"></span><strong>${item.title}</strong><span>${item.hint}</span>`;
-    btn.addEventListener("click", () => {
-      textarea.value = "";
-      closeSlash(mac);
-      textarea.focus();
+  SLASH.forEach((item, i) => {
+    const b = el("button", i === 0 ? "on" : "");
+    b.innerHTML = `<span class="sn">${item.name}</span><span class="sh">${item.hint}</span><span class="sd">${item.desc}</span>`;
+    b.addEventListener("click", () => {
+      ta.value = `${item.name} `;
+      menu.classList.remove("open");
+      ta.focus();
     });
-    menu.append(btn);
+    menu.append(b);
   });
-  const dock = mac.querySelector(".dock");
-  const composer = mac.querySelector(".composer");
-  if (anchorToCaret) {
-    const p = caretPoint(textarea);
-    const left = composer.offsetLeft + p.x;
-    menu.style.left = `${Math.min(left, dock.clientWidth - 268 - 16)}px`;
-    menu.style.bottom = `${dock.offsetHeight - composer.offsetTop - p.y - 2}px`;
+  const wrap = app.querySelector(".cwrap");
+  if (atCaret) {
+    const p = caretXY(ta);
+    menu.style.left = `${Math.min(p.x, wrap.clientWidth - 332)}px`;
+    menu.style.bottom = `${wrap.clientHeight - p.y + 4}px`;
   } else {
-    menu.style.left = `${composer.offsetLeft}px`;
-    menu.style.bottom = `${dock.offsetHeight - composer.offsetTop + 6}px`;
+    menu.style.left = "14px";
+    menu.style.bottom = `${wrap.clientHeight - 4}px`;
   }
-  menu.classList.add("is-open");
+  menu.classList.add("open");
 }
 
-function closeSlash(mac) {
-  const menu = mac.querySelector(".slash");
-  if (menu) menu.classList.remove("is-open");
-}
-
-function bind(mac) {
-  const textarea = mac.querySelector("textarea");
-  const send = mac.querySelector(".send");
-  textarea.addEventListener("input", () => {
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
-    if (textarea.value.endsWith("/")) openSlash(mac, true);
-    else if (!textarea.value.includes("/")) closeSlash(mac);
+function bind(app) {
+  const ta = app.querySelector("textarea");
+  if (!ta) return;
+  ta.addEventListener("input", () => {
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 96)}px`;
+    if (ta.value.endsWith("/")) openSlash(app, true);
+    else if (!ta.value.startsWith("/")) app.querySelector(".slash")?.classList.remove("open");
   });
-  textarea.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeSlash(mac);
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+  ta.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") app.querySelector(".slash")?.classList.remove("open");
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      submit(mac);
+      submit(app);
     }
   });
-  send.addEventListener("click", () => submit(mac));
-  mac.querySelector(".search")?.addEventListener("click", () => {
-    textarea.focus();
-    openSlash(mac, false);
+  app.querySelector(".send")?.addEventListener("click", () => submit(app));
+  app.querySelector(".plus")?.addEventListener("click", () => {
+    ta.focus();
+    openSlash(app, false);
   });
 }
 
-function submit(mac) {
-  const textarea = mac.querySelector("textarea");
-  const text = textarea.value.trim().replace(/^\/+/, "");
-  closeSlash(mac);
+function submit(app) {
+  const ta = app.querySelector("textarea");
+  const text = ta.value.trim();
+  app.querySelector(".slash")?.classList.remove("open");
   if (!text) return;
-  const thread = mac.querySelector(".thread");
-  if (thread && mac.dataset.scene === "session") {
-    const block = el("div", "block user");
-    block.innerHTML = `<span class="handle" aria-hidden="true"></span><p></p>`;
-    block.querySelector("p").textContent = text;
-    thread.append(block);
-    requestAnimationFrame(() => block.classList.add("in"));
-    const scroll = mac.querySelector(".scroll");
-    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+  const flow = app.querySelector(".flow");
+  if (flow && !app.querySelector(".led")) {
+    const n = el("div", "node n-user enter");
+    n.innerHTML = `<div class="n-meta">你 · 排队</div><p></p>`;
+    n.querySelector("p").textContent = text;
+    flow.append(n);
+    flow.scrollTop = flow.scrollHeight;
   }
-  textarea.value = "";
-  textarea.style.height = "auto";
+  ta.value = "";
+  ta.style.height = "auto";
 }
 
 /* ————— 外壳 ————— */
 
 function mount(which) {
-  const host = hosts[which];
-  const styleId = state[which];
-  const mac = buildWindow(styleId, state.scene, state.appearance);
-  host.replaceChildren(mac);
-  bind(mac);
-  if (state.scene === "session") play(mac);
-  const cap = document.querySelector(`[data-win="${which}"] figcaption em`);
-  if (cap) cap.textContent = byId(styleId).nameZh;
+  const app = buildApp(state[which], state.scene, state.look);
+  hosts[which].replaceChildren(app);
+  bind(app);
+  play(app);
+  const cap = document.querySelector(`[data-win="${which}"] figcaption b`);
+  if (cap) cap.textContent = byId(state[which]).zh;
 }
 
 function mountAll() {
   mount("a");
-  if (state.compare) mount("b");
+  if (state.cmp) mount("b");
 }
 
 function renderCards() {
-  const root = document.querySelector(".pg-styles");
-  root.replaceChildren();
-  STRUCTURES.forEach((item, i) => {
-    const card = el("button", "style-card");
-    card.dataset.style = item.id;
-    card.innerHTML = `
-      <span class="sc-swatch" aria-hidden="true">
-        <i style="background:${item.swatch[0]}"></i>
-        <i style="background:${item.swatch[1]}"></i>
-        <i style="background:${item.swatch[2]}"></i>
-      </span>
-      <span class="sc-body">
-        <span class="sc-tag">${item.tag}</span>
-        <strong>${i + 1} · ${item.nameZh}</strong>
-        <small>${item.name}</small>
-      </span>`;
-    card.addEventListener("click", () => pick(item.id));
-    root.append(card);
+  const side = document.querySelector(".pg-side");
+  side.querySelectorAll(".vcard").forEach((n) => n.remove());
+  VARIANTS.forEach((v, i) => {
+    const c = el("button", "vcard");
+    c.dataset.v = v.id;
+    c.innerHTML = `<span class="vk"><b>${v.zh}</b><em>${i + 1}</em></span><p>${v.tag} · ${v.name}</p>`;
+    c.addEventListener("click", () => pick(v.id));
+    side.append(c);
   });
   syncCards();
 }
 
 function syncCards() {
-  const active = state[state.focus];
-  document.querySelectorAll(".style-card").forEach((c) => c.classList.toggle("is-on", c.dataset.style === active));
+  const cur = state[state.focus];
+  document.querySelectorAll(".vcard").forEach((c) => c.classList.toggle("on", c.dataset.v === cur));
 }
 
 function renderNotes() {
-  const item = byId(state[state.focus]);
-  document.querySelector(".pg-notes").innerHTML = `
-    <p class="kicker">${item.tag}</p>
-    <h2>${item.nameZh} <small>${item.name}</small></h2>
-    <p class="lede">${item.thesis}</p>
-    <dl>
-      <div><dt>动效</dt><dd>${item.motion}</dd></div>
-      <div><dt>代价</dt><dd>${item.cost}</dd></div>
-      <div><dt>什么时候选它</dt><dd>${item.pick}</dd></div>
-    </dl>`;
+  const v = byId(state[state.focus]);
+  document.querySelector(".pg-notes").innerHTML =
+    `<p class="eyebrow">${v.tag}</p><h3>${v.zh}</h3><p class="sub">${v.name}</p>` +
+    `<p>${v.thesis}</p><dl>` +
+    `<dt>比官方 web 多了什么</dt><dd>${v.edge}</dd>` +
+    `<dt>代价</dt><dd>${v.cost}</dd>` +
+    `<dt>什么时候选它</dt><dd>${v.pick}</dd></dl>`;
 }
 
 function pick(id) {
@@ -743,42 +716,43 @@ function pick(id) {
   mount(state.focus);
   syncCards();
   renderNotes();
-  writeHash();
+  hash();
 }
 
 function setScene(scene) {
   state.scene = scene;
-  document.querySelectorAll(".pg-scenes button").forEach((b) => b.classList.toggle("is-on", b.dataset.scene === scene));
+  document.querySelectorAll("[data-scene]").forEach((b) => b.classList.toggle("on", b.dataset.scene === scene));
   mountAll();
-  writeHash();
+  hash();
 }
 
-function setAppearance(mode) {
-  state.appearance = mode;
-  document.querySelectorAll("[data-appearance]").forEach((b) => b.classList.toggle("is-on", b.dataset.appearance === mode));
-  document.body.dataset.appearance = mode;
-  mountAll();
-  writeHash();
+function setLook(look) {
+  state.look = look;
+  document.body.dataset.look = look;
+  document.querySelectorAll("[data-look]").forEach((b) => {
+    if (b.tagName === "BUTTON") b.classList.toggle("on", b.dataset.look === look);
+  });
+  hash();
 }
 
-function toggleCompare() {
-  state.compare = !state.compare;
-  if (!state.compare) {
+function toggleCmp() {
+  state.cmp = !state.cmp;
+  if (!state.cmp) {
     state.focus = "a";
-    document.querySelectorAll(".pg-frame").forEach((f) => f.classList.toggle("is-focus", f.dataset.win === "a"));
+    document.querySelectorAll(".frame").forEach((f) => f.classList.toggle("on", f.dataset.win === "a"));
   }
-  document.querySelector('[data-action="compare"]').setAttribute("aria-pressed", String(state.compare));
-  document.querySelector(".pg-windows").dataset.compare = String(state.compare);
-  document.querySelector('[data-win="b"]').hidden = !state.compare;
-  if (state.compare) mount("b");
+  document.querySelector('[data-act="cmp"]').setAttribute("aria-pressed", String(state.cmp));
+  document.querySelector(".pg-stage").dataset.cmp = String(state.cmp);
+  document.querySelector('[data-win="b"]').hidden = !state.cmp;
+  if (state.cmp) mount("b");
   syncCards();
   renderNotes();
-  writeHash();
+  hash();
 }
 
-function writeHash() {
-  const p = new URLSearchParams({ s: state.a, scene: state.scene, look: state.appearance });
-  if (state.compare) {
+function hash() {
+  const p = new URLSearchParams({ v: state.a, scene: state.scene, look: state.look });
+  if (state.cmp) {
     p.set("cmp", "1");
     p.set("b", state.b);
   }
@@ -787,55 +761,66 @@ function writeHash() {
 
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
-  const ids = STRUCTURES.map((s) => s.id);
-  if (ids.includes(p.get("s"))) state.a = p.get("s");
+  const ids = VARIANTS.map((v) => v.id);
+  if (ids.includes(p.get("v"))) state.a = p.get("v");
   if (ids.includes(p.get("b"))) state.b = p.get("b");
-  if (Object.keys(SCENES).includes(p.get("scene"))) state.scene = p.get("scene");
-  if (["day", "dusk"].includes(p.get("look"))) state.appearance = p.get("look");
-  if (p.get("cmp") === "1") state.compare = true;
+  if (SCENES[p.get("scene")]) state.scene = p.get("scene");
+  if (["paper", "field"].includes(p.get("look"))) state.look = p.get("look");
+  if (p.get("cmp") === "1") state.cmp = true;
 }
 
-document.querySelectorAll(".pg-scenes button").forEach((b) => b.addEventListener("click", () => setScene(b.dataset.scene)));
-document.querySelectorAll("[data-appearance]").forEach((b) => b.addEventListener("click", () => setAppearance(b.dataset.appearance)));
-document.querySelector('[data-action="compare"]').addEventListener("click", toggleCompare);
-document.querySelector('[data-action="replay"]').addEventListener("click", () => {
-  setScene("session");
-});
-document.querySelectorAll(".pg-frame").forEach((frame) => {
-  frame.addEventListener("mousedown", () => {
-    if (!state.compare) return;
-    state.focus = frame.dataset.win;
-    document.querySelectorAll(".pg-frame").forEach((f) => f.classList.toggle("is-focus", f === frame));
+document.querySelectorAll(".tabs2 [data-scene]").forEach((b) => b.addEventListener("click", () => setScene(b.dataset.scene)));
+document.querySelectorAll(".seg [data-look]").forEach((b) => b.addEventListener("click", () => setLook(b.dataset.look)));
+document.querySelector('[data-act="cmp"]').addEventListener("click", toggleCmp);
+document.querySelector('[data-act="replay"]').addEventListener("click", () => mountAll());
+document.querySelectorAll(".frame").forEach((f) =>
+  f.addEventListener("mousedown", () => {
+    if (!state.cmp) return;
+    state.focus = f.dataset.win;
+    document.querySelectorAll(".frame").forEach((n) => n.classList.toggle("on", n === f));
     syncCards();
     renderNotes();
-  });
-});
+  })
+);
+
+document.getElementById("accs").innerHTML = VARIANTS.map(
+  (v, i) => `<span class="acc">[<i>${i + 1}</i>]${v.zh}</span>`
+).join(" ");
 
 window.addEventListener("keydown", (e) => {
-  const inField = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
-  if (e.key === "Escape") document.querySelectorAll(".mac").forEach(closeSlash);
-  if (inField) return;
+  if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
+    if (e.key === "Escape") document.querySelectorAll(".slash").forEach((m) => m.classList.remove("open"));
+    return;
+  }
   const n = Number(e.key);
-  if (n >= 1 && n <= STRUCTURES.length) pick(STRUCTURES[n - 1].id);
-  const scenes = { q: "session", w: "first", e: "empty", r: "error" };
+  if (n >= 1 && n <= VARIANTS.length) pick(VARIANTS[n - 1].id);
   const k = e.key.toLowerCase();
+  const scenes = { q: "session", w: "approval", e: "trajectory", r: "hero" };
   if (scenes[k]) setScene(scenes[k]);
-  if (k === "c") toggleCompare();
-  if (k === "d") setAppearance(state.appearance === "day" ? "dusk" : "day");
+  if (k === "c") toggleCmp();
+  if (k === "d") setLook(state.look === "paper" ? "field" : "paper");
   if (e.code === "Space") {
     e.preventDefault();
-    document.querySelectorAll(".mac").forEach((m) => m.dataset.scene === "session" && play(m));
+    mountAll();
+  }
+  if (e.key === "/") {
+    e.preventDefault();
+    const app = hosts[state.cmp ? state.focus : "a"].querySelector(".app");
+    const ta = app?.querySelector("textarea");
+    if (ta) {
+      ta.focus();
+      openSlash(app, false);
+    }
   }
 });
 
 readHash();
-document.body.dataset.appearance = state.appearance;
-document.querySelectorAll("[data-appearance]").forEach((b) => b.classList.toggle("is-on", b.dataset.appearance === state.appearance));
-document.querySelectorAll(".pg-scenes button").forEach((b) => b.classList.toggle("is-on", b.dataset.scene === state.scene));
-document.querySelector('[data-action="compare"]').setAttribute("aria-pressed", String(state.compare));
-document.querySelector(".pg-windows").dataset.compare = String(state.compare);
-document.querySelector('[data-win="b"]').hidden = !state.compare;
+setLook(state.look);
+document.querySelectorAll("[data-scene]").forEach((b) => b.classList.toggle("on", b.dataset.scene === state.scene));
+document.querySelector('[data-act="cmp"]').setAttribute("aria-pressed", String(state.cmp));
+document.querySelector(".pg-stage").dataset.cmp = String(state.cmp);
+document.querySelector('[data-win="b"]').hidden = !state.cmp;
 renderCards();
 mountAll();
 renderNotes();
-writeHash();
+hash();

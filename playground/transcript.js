@@ -1,28 +1,90 @@
 /**
- * 一次真实形状的 agent 回合。四种结构渲染同一份数据，
- * 所以对比的是版式和节奏，不是文案。
+ * 按 DeepSeek Harness 官方 web 客户端的真实模型建的数据。
+ *
+ * 会话 = 若干轮，轮 = 若干步。聊天视图渲染的是 Conversation Node，
+ * 不是原始事件；assistant 消息由 text / reasoning / tool-call 块组成。
+ * 上下文占用、统计、待办、权限这些数字都是宿主算好的投影，客户端不自己折叠。
+ * 词汇跟着官方 UI：会话、工作区、轮、步、工具、访问模式、审批、任务。
  */
-const TRANSCRIPT = [
-  {
-    kind: "user",
-    text: "侧栏现在只是个文件夹列表。把它做成工作区书签——会话跟着文件夹走，切回来还在上次那一页。",
+
+const SESSION = {
+  title: "把侧栏做成工作区书签",
+  workspace: "dsh-studio",
+  path: "~/projj/github.com/gxcsoccer/dsh-studio",
+  preset: "Standard mode",
+  access: "workspace-write",
+  accessLabel: "Workspace write",
+  model: "deepseek-v4-pro",
+  effort: "high",
+  context: { used: 41200, capacity: 128000 },
+  stats: {
+    turns: 3,
+    steps: 7,
+    llm: "18.4s",
+    tools: "6.1s",
+    ttft: "0.9s",
+    tps: 62,
+    cache: 78,
+    input: 41200,
+    output: 3840,
   },
+};
+
+const WORKSPACES = [
   {
-    kind: "think",
-    ms: 1100,
-    title: "读了 3 个文件",
-    lines: [
-      "会话 id 现在挂在 AppModel 上，切工作区就丢。",
-      "WorkspaceStore 已经持久化了 recents，可以复用同一个 bookmark。",
-      "官方原则是 model-visible means logged，所以恢复要从 session/event 走，不能在原生端另存一份。",
+    name: "dsh-studio",
+    path: "~/projj/github.com/gxcsoccer/dsh-studio",
+    open: true,
+    sessions: [
+      { title: "把侧栏做成工作区书签", when: "刚刚", state: "current" },
+      { title: "主题 token 热更新", when: "2 小时前", state: "running", detail: "运行中" },
+      { title: "首次运行的检查文案", when: "昨天", state: "done", detail: "未查看" },
+      { title: "桥接端口冲突排查", when: "昨天", state: "idle" },
     ],
   },
   {
-    kind: "read",
+    name: "harness-docs",
+    path: "~/projj/github.com/deepseek-ai/deepseek-harness",
+    open: false,
+    sessions: [
+      { title: "读 session/event 目录", when: "3 天前", state: "wait", detail: "等待审批" },
+    ],
+  },
+];
+
+const TODOS = [
+  { text: "侧栏改成按工作区分组", done: true },
+  { text: "书签写进钥匙串", done: false, active: true },
+  { text: "切回工作区时恢复会话", done: false },
+];
+
+/** 一轮的节点流。tool 的 render 字段对应官方的渲染意图。 */
+const NODES = [
+  {
+    kind: "user",
+    time: "14:02",
+    text: "侧栏现在只是文件夹列表。做成工作区书签——会话跟着文件夹走，切回来还在上次那一页。",
+  },
+  {
+    kind: "assistant",
+    turn: 3,
+    step: 1,
+    reasoning: [
+      "会话 id 挂在 AppModel 上，切工作区就丢。",
+      "WorkspaceStore 已经持久化了 recents，可以复用同一条书签。",
+      "恢复要从 session/event 重建，原生端不另存一份权威记录。",
+    ],
+    text: "先看现在工作区是怎么存的。",
+  },
+  {
+    kind: "tool",
+    tool: "read",
+    render: "read",
     ms: 700,
-    file: "WorkspaceStore.swift",
-    range: "42–61",
+    title: "WorkspaceStore.swift",
+    meta: "42–61 行，共 118 行",
     lang: "swift",
+    startLine: 42,
     code: [
       "final class WorkspaceStore: ObservableObject {",
       "    @Published var url: URL",
@@ -36,18 +98,20 @@ const TRANSCRIPT = [
     ],
   },
   {
-    kind: "edit",
+    kind: "tool",
+    tool: "edit",
+    render: "diff",
     ms: 900,
-    file: "WorkspaceStore.swift",
+    title: "WorkspaceStore.swift",
+    meta: "+6 −1 · 1 个文件",
     lang: "swift",
-    added: 6,
-    removed: 1,
     diff: [
       { op: " ", text: "    func open(_ url: URL) {" },
       { op: " ", text: "        self.url = url" },
       { op: "-", text: "        pushRecent(url)" },
       { op: "+", text: "        pushRecent(url)" },
       { op: "+", text: "        bookmarks[url] = lastSessionID" },
+      { op: "+", text: "" },
       { op: "+", text: "        if let resumed = bookmarks[url] {" },
       { op: "+", text: "            Task { await agents.resume(resumed) }" },
       { op: "+", text: "        }" },
@@ -55,8 +119,13 @@ const TRANSCRIPT = [
     ],
   },
   {
-    kind: "run",
-    ms: 1500,
+    kind: "tool",
+    tool: "bash",
+    render: "terminal",
+    ms: 1600,
+    title: "swift build --package-path app",
+    meta: "退出 0",
+    cwd: "~/…/dsh-studio",
     cmd: "swift build --package-path app",
     out: [
       "Compiling DSH WorkspaceStore.swift",
@@ -66,66 +135,61 @@ const TRANSCRIPT = [
     ok: true,
   },
   {
-    kind: "approve",
-    title: "把工作区书签写进钥匙串？",
-    detail: "书签含安全作用域数据。写入 login 钥匙串，不进仓库、不进 profile。",
-    accept: "允许一次",
-    reject: "这次跳过",
+    kind: "approval",
+    tool: "bash",
+    reason: "工具 bash 请求越权执行",
+    command: "security add-generic-password -s dsh-studio -a bookmarks -w",
+    note: "写入 login 钥匙串。工作区书签含安全作用域数据，不进仓库、不进 profile。",
   },
   {
-    kind: "say",
-    text: "侧栏现在是书签了。切回 dsh-studio 会恢复上一次的会话；恢复走 session/event，原生端不留第二份记录。",
+    kind: "assistant",
+    turn: 3,
+    step: 2,
+    text: "侧栏现在是书签了。切回 dsh-studio 会恢复上一次的会话，恢复走 session/event，原生端不留第二份记录。",
   },
+  {
+    kind: "turn-tail",
+    turn: 3,
+    ran: "24.5s",
+    ttft: "0.9s",
+    tps: 62,
+    files: ["WorkspaceStore.swift", "SidebarSlot.swift"],
+  },
+];
+
+/** Trajectory 视图的事件账本。官方那栏只有序号、事件、内容三列。 */
+const LEDGER = [
+  { seq: 118, type: "turn/start", who: "", text: "turn 3", ms: 0, span: 2 },
+  { seq: 119, type: "user/message", who: "user", text: "侧栏现在只是文件夹列表。做成工作区书签…", ms: 0, span: 3 },
+  { seq: 120, type: "step/start", who: "", text: "step 1", ms: 120, span: 2 },
+  { seq: 121, type: "assistant/chunk", who: "asst", text: "reasoning · 3 段", ms: 900, span: 26, ttft: 9 },
+  { seq: 124, type: "tool/call", who: "tool", text: "read WorkspaceStore.swift", ms: 3100, span: 8 },
+  { seq: 125, type: "tool/result", who: "tool", text: "20 行", ms: 3800, span: 3, surface: true },
+  { seq: 128, type: "tool/call", who: "tool", text: "edit WorkspaceStore.swift", ms: 4200, span: 10 },
+  { seq: 129, type: "tool/result", who: "tool", text: "+6 −1", ms: 5100, span: 3, surface: true },
+  { seq: 132, type: "tool/call", who: "tool", text: "bash swift build", ms: 5400, span: 18 },
+  { seq: 133, type: "approval/asked", who: "", text: "bash · 越权", ms: 7000, span: 4 },
+  { seq: 134, type: "approval/decided", who: "", text: "allowed-once", ms: 9400, span: 2 },
+  { seq: 136, type: "tool/result", who: "tool", text: "退出 0", ms: 9600, span: 3, surface: true },
+  { seq: 140, type: "assistant/message", who: "asst", text: "侧栏现在是书签了…", ms: 10200, span: 12, surface: true },
+  { seq: 142, type: "step/end", who: "", text: "step 2", ms: 11800, span: 2 },
+  { seq: 143, type: "turn/end", who: "", text: "turn 3 · 24.5s", ms: 12000, span: 2 },
+];
+
+/** `/` 触发器的候选。命令来自宿主，技能来自 dsh-tool-skill。 */
+const SLASH = [
+  { name: "/plan", hint: "[off|message]", desc: "进入或离开计划模式", src: "命令" },
+  { name: "/compact", hint: "", desc: "压缩较早的对话历史", src: "命令" },
+  { name: "/permission", hint: "<preset>", desc: "切换访问模式", src: "命令" },
+  { name: "/goal", hint: "[<目标>|clear]", desc: "为长任务设定目标", src: "命令" },
+  { name: "/model", hint: "", desc: "切换模型与思考强度", src: "命令" },
+  { name: "/export", hint: "", desc: "把会话日志导出为 ZIP", src: "命令" },
+  { name: "/review-diff", hint: "", desc: "逐文件过一遍改动", src: "技能" },
 ];
 
 const SCENES = {
-  session: {
-    kicker: "会话 · 进行中",
-    title: ["把侧栏做成", "工作区书签"],
-    lede: "会话跟着文件夹走。切回来还在上次那一页，恢复从官方事件流重建。",
-    phase: "已就绪",
-    status: ["已就绪 · 官方运行时", "ok"],
-  },
-  first: {
-    kicker: "第一次打开",
-    title: ["先把运行时", "装好"],
-    lede: "Studio 是官方 dsh 的原生宿主，不内置 Node。缺什么给一个动作，而不是一篇 Cordis 教程。",
-    phase: "缺少依赖",
-    status: ["等待依赖 · 未启动", "warn"],
-    checks: [
-      { state: "ok", title: "Node.js 22.19+", detail: "v22.19.0 · /opt/homebrew/bin/node" },
-      { state: "ok", title: "dsh 运行时", detail: "npx @deepseek-ai/dsh · 官方包" },
-      { state: "todo", title: "DeepSeek API 密钥", detail: "可以稍后。存钥匙串，不写进仓库。" },
-    ],
-    actions: [["重新检查", true], ["仍要启动", false]],
-  },
-  empty: {
-    kicker: "工作区",
-    title: ["还没有项目", "落在 Studio 里"],
-    lede: "打开一个文件夹，会话就跟着它走。用过的会留在侧栏，下次直接回到那一页。",
-    phase: "已就绪",
-    status: ["已就绪 · 等一个工作区", "ok"],
-    actions: [["打开文件夹", true], ["从最近选择", false]],
-  },
-  error: {
-    kicker: "运行时",
-    title: ["运行时", "没有起来"],
-    lede: "预览版上游会破。可以重启，或修复 studio profile；旧会话日志保持只读。",
-    phase: "失败",
-    status: ["运行时没有起来", "bad"],
-    log: [
-      "bridge 127.0.0.1:43180 connection refused",
-      "profile studio: bundle dsh-studio not resolved",
-      "hint: dsh --profile studio --dump-config",
-    ],
-    actions: [["重启运行时", true], ["修复 Profile", false]],
-  },
+  session: { label: "会话", tone: "ok", status: "已就绪 · 官方运行时" },
+  approval: { label: "审批", tone: "wait", status: "等待审批 · bash 越权" },
+  hero: { label: "新会话", tone: "ok", status: "已就绪 · 未选择工作区" },
+  trajectory: { label: "轨迹", tone: "ok", status: "已就绪 · 官方运行时" },
 };
-
-const SLASH_ITEMS = [
-  { title: "新会话", hint: "在这个工作区开一页", tint: "gold" },
-  { title: "把 README 交给 Agent", hint: "agent.inject()", tint: "sky" },
-  { title: "打开工作区", hint: "⌘O", tint: "mocha" },
-  { title: "切换主题", hint: "热更新 token", tint: "coral" },
-  { title: "重启运行时", hint: "⇧⌘R", tint: "gold" },
-];

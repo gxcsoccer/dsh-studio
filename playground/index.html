@@ -3,52 +3,50 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DSH Studio · 设计现场</title>
+  <title>DSH Studio · 桌面设计现场</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./playground.css" />
 </head>
-<body>
+<body data-look="paper">
   <div class="pg">
     <header class="pg-top">
       <div class="pg-brand">
-        <span class="pg-mark" aria-hidden="true"></span>
-        <div>
-          <strong>DSH Studio</strong>
-          <span>四种结构，两种光线。看 agent 干活的地方长什么样。</span>
-        </div>
+        <b>dsh-studio</b>
+        <span>桌面设计现场 · 对着官方 web 版改</span>
       </div>
-      <div class="pg-top-actions">
+      <div class="pg-top-right">
+        <p class="hint" id="accs"></p>
         <div class="seg" role="group" aria-label="外观">
-          <button type="button" data-appearance="day" class="is-on">日</button>
-          <button type="button" data-appearance="dusk">暮</button>
+          <button type="button" data-look="paper" class="on">纸</button>
+          <button type="button" data-look="field">场</button>
         </div>
-        <button type="button" class="pg-ghost" data-action="replay">重播</button>
-        <button type="button" class="pg-ghost" data-action="compare" aria-pressed="false">对比</button>
+        <button type="button" class="tbtn" data-act="replay">重播</button>
+        <button type="button" class="tbtn" data-act="cmp" aria-pressed="false">对比</button>
       </div>
     </header>
 
-    <aside class="pg-styles" aria-label="结构"></aside>
+    <aside class="pg-side" aria-label="方案"><h2>方案</h2></aside>
 
     <main class="pg-main">
-      <div class="pg-toolbar">
-        <div class="pg-scenes" role="group" aria-label="场景">
-          <button type="button" class="is-on" data-scene="session">会话</button>
-          <button type="button" data-scene="first">首次运行</button>
-          <button type="button" data-scene="empty">空工作区</button>
-          <button type="button" data-scene="error">失败</button>
+      <div class="pg-bar">
+        <div class="tabs2" role="group" aria-label="场景">
+          <button type="button" class="on" data-scene="session">会话</button>
+          <button type="button" data-scene="approval">审批</button>
+          <button type="button" data-scene="trajectory">轨迹</button>
+          <button type="button" data-scene="hero">新会话</button>
         </div>
-        <p class="pg-hint"><kbd>1</kbd>–<kbd>4</kbd> 结构 · <kbd>Q W E R</kbd> 场景 · <kbd>D</kbd> 日暮 · <kbd>C</kbd> 对比 · <kbd>Space</kbd> 重播</p>
+        <p class="hint">1–4 方案 · Q W E R 场景 · D 纸/场 · C 对比 · Space 重播 · / 插入</p>
       </div>
-      <div class="pg-windows" data-compare="false">
-        <figure class="pg-frame is-focus" data-win="a">
-          <figcaption><span class="tick">A</span> <em></em></figcaption>
-          <div class="pg-host" id="host-a"></div>
+      <div class="pg-stage" data-cmp="false">
+        <figure class="frame on" data-win="a">
+          <figcaption>A<b></b></figcaption>
+          <div class="host" id="host-a"></div>
         </figure>
-        <figure class="pg-frame" data-win="b" hidden>
-          <figcaption><span class="tick">B</span> <em></em></figcaption>
-          <div class="pg-host" id="host-b"></div>
+        <figure class="frame" data-win="b" hidden>
+          <figcaption>B<b></b></figcaption>
+          <div class="host" id="host-b"></div>
         </figure>
       </div>
     </main>
