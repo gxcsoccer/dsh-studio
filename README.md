@@ -116,6 +116,7 @@ DeepSeek 的设计是 **「一切皆插件」**（Everything is a plugin），�
 - [docs/migration-ledger.md](./docs/migration-ledger.md) — 迁移账本与漂移记录
 - [docs/bridge-contract.md](./docs/bridge-contract.md) — 控制通道 / 数据通道协议
 - [docs/reference/native-slot-proxy.md](./docs/reference/native-slot-proxy.md) — 核心机制的参考实现
+- [docs/known-gaps.md](./docs/known-gaps.md) — W1 实现暴露的设计缺口（含上线前必修项）
 
 **决策 / ADR**
 

@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/studio-client/src/**/*.ts",
+    "packages/studio-client/src/**/*.tsx",
+    "packages/studio-client/tests/**/*.ts",
+    "packages/studio-client/tests/**/*.tsx",
+    "packages/studio-surface/src/**/*.ts",
+    "packages/studio-surface/tests/**/*.ts"
+  ]
+}

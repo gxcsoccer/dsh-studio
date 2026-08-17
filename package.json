@@ -1,0 +1,35 @@
+{
+  "name": "dsh-studio",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.26.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "description": "DSH Studio — a world-class native desktop for DeepSeek Harness. Migrates the official Web UI to SwiftUI one slot at a time.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gxcsoccer/dsh-studio.git"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test packages/studio-client/tests/*.test.ts packages/studio-client/tests/*.test.tsx packages/studio-surface/tests/*.test.ts",
+    "check": "npm run typecheck && npm run test",
+    "swift:build": "cd apps/macos && swift build",
+    "swift:test": "cd apps/macos && swift test"
+  },
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "npm:schemastery@3.18.0",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.10.0",
+    "@types/react": "~18.3.12",
+    "@types/react-dom": "~18.3.1",
+    "jsdom": "^25.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.19.2",
+    "typescript": "~5.7.2"
+  }
+}
