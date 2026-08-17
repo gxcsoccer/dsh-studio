@@ -431,7 +431,15 @@ describe('the handshake file (§2.1)', () => {
 
   test('it is written 0600, in a 0700 directory, and it round-trips', () => {
     const path = join(directory, 'nested', 'bridge.json')
-    const handshake = { port: 43180, origin: 'http://127.0.0.1:43180', token: mintToken(), protocol: 1, pid: 4242 }
+    const handshake = {
+      host: LOOPBACK_ADDRESS,
+      port: 43180,
+      origin: 'http://127.0.0.1:43180',
+      token: mintToken(),
+      protocol: 1,
+      pid: 4242,
+      webUrl: 'http://127.0.0.1:3080',
+    }
     const remove = writeHandshakeFile(path, handshake)
     try {
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), handshake)
@@ -444,12 +452,37 @@ describe('the handshake file (§2.1)', () => {
     assert.throws(() => statSync(path), /ENOENT/)
   })
 
+  test('the field table the native half decodes is written verbatim, webUrl included', () => {
+    const path = join(directory, 'fields.json')
+    const remove = writeHandshakeFile(path, {
+      host: LOOPBACK_ADDRESS,
+      port: 43180,
+      origin: 'http://127.0.0.1:43180',
+      token: 'deadbeef',
+      protocol: 1,
+      pid: 7,
+      webUrl: 'http://127.0.0.1:3080',
+    })
+    try {
+      // Key set, not just values: the native `BridgeDescriptor` decodes exactly
+      // `host`/`port`/`token`/`protocol`/`webUrl`, and a renamed key here is a
+      // silent "runtime offline" screen over there.
+      assert.deepEqual(Object.keys(JSON.parse(readFileSync(path, 'utf8')) as object).sort(),
+        ['host', 'origin', 'pid', 'port', 'protocol', 'token', 'webUrl'])
+    } finally {
+      remove()
+    }
+  })
+
   test('a second write replaces the file rather than appending to it', () => {
     const path = join(directory, 'bridge.json')
-    writeHandshakeFile(path, { port: 1, origin: 'a', token: 'x', protocol: 1, pid: 1 })()
-    const remove = writeHandshakeFile(path, { port: 2, origin: 'b', token: 'y', protocol: 1, pid: 2 })
+    writeHandshakeFile(path, { host: LOOPBACK_ADDRESS, port: 1, origin: 'a', token: 'x', protocol: 1, pid: 1 })()
+    const remove = writeHandshakeFile(path, { host: LOOPBACK_ADDRESS, port: 2, origin: 'b', token: 'y', protocol: 1, pid: 2 })
     try {
       assert.equal((JSON.parse(readFileSync(path, 'utf8')) as { port: number }).port, 2)
+      // No `webUrl` key at all when the deployment configured none: the native
+      // half must be able to tell "unpublished" from "the empty string".
+      assert.equal('webUrl' in (JSON.parse(readFileSync(path, 'utf8')) as object), false)
     } finally {
       remove()
     }
@@ -457,7 +490,7 @@ describe('the handshake file (§2.1)', () => {
 
   test('removing an already-removed file is not an error (unload runs once, but idempotently)', () => {
     const path = join(directory, 'gone.json')
-    const remove = writeHandshakeFile(path, { port: 1, origin: 'a', token: 'x', protocol: 1, pid: 1 })
+    const remove = writeHandshakeFile(path, { host: LOOPBACK_ADDRESS, port: 1, origin: 'a', token: 'x', protocol: 1, pid: 1 })
     remove()
     assert.equal(remove(), undefined)
   })

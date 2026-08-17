@@ -7,7 +7,7 @@
   "engines": {
     "node": ">=22"
   },
-  "description": "DSH Studio — a world-class native desktop for DeepSeek Harness. Migrates the official Web UI to SwiftUI one slot at a time.",
+  "description": "DSH Studio \u2014 a world-class native desktop for DeepSeek Harness. Migrates the official Web UI to SwiftUI one slot at a time.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -18,10 +18,14 @@
     "test": "node --import tsx --test packages/studio-client/tests/*.test.ts packages/studio-client/tests/*.test.tsx packages/studio-surface/tests/*.test.ts",
     "check": "npm run typecheck && npm run test",
     "swift:build": "cd apps/macos && swift build",
-    "swift:test": "cd apps/macos && swift test"
+    "swift:test": "cd apps/macos && swift test",
+    "bundle": "pnpm -r --filter \"./packages/**\" run bundle",
+    "studio:home": "node scripts/studio-home.mjs",
+    "studio:dump-config": "node scripts/studio-home.mjs --run --dump-config",
+    "studio:web": "node scripts/studio-home.mjs --run"
   },
   "devDependencies": {
-    "@deepseek-ai/schemastery": "npm:schemastery@3.18.0",
+    "@deepseek-ai/schemastery": "3.18.1",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^22.10.0",
     "@types/react": "~18.3.12",
@@ -29,6 +33,7 @@
     "jsdom": "^25.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tsdown": "^0.15.9",
     "tsx": "^4.19.2",
     "typescript": "~5.7.2"
   }

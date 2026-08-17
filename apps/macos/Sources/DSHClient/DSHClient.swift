@@ -107,7 +107,7 @@ public final class DSHClient {
     private let provider: any DSHConnectionProvider
     private let policy: ResumePolicy
     private let now: @Sendable () -> Date
-    private let sleeper: @Sendable (TimeInterval) async throws -> Void
+    private let sleeper: SecondsSleepFunction
 
     @ObservationIgnored private var handle: DSHConnectionHandle?
     @ObservationIgnored private var disconnectedAt: Date?
@@ -116,15 +116,15 @@ public final class DSHClient {
     public init(
         provider: any DSHConnectionProvider = LoopbackConnectionProvider(),
         policy: ResumePolicy = ResumePolicy(),
-        now: @escaping @Sendable () -> Date = { Date() },
-        sleeper: @escaping @Sendable (TimeInterval) async throws -> Void = { seconds in
-            try await Task.sleep(for: .seconds(seconds))
-        }
+        now: (@Sendable () -> Date)? = nil,
+        // 命名常量的默认值（DSHKit/InjectableClock.swift）：默认参数里的 async
+        // 闭包字面量会在重连退避那一跳上让进程 abort。
+        sleeper: SecondsSleepFunction? = nil
     ) {
         self.provider = provider
         self.policy = policy
-        self.now = now
-        self.sleeper = sleeper
+        self.now = now ?? SystemClock.now
+        self.sleeper = sleeper ?? SystemSleep.seconds
     }
 
     deinit {

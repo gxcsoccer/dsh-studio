@@ -23,7 +23,7 @@
 
 import { toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 import { PROTOCOL_VERSION } from '@dsh-studio/studio-client/src/index.ts'
-import { Config, surfaceCensus, toWireManifest } from './config.ts'
+import { Config, LOOPBACK_ADDRESS, surfaceCensus, toWireManifest } from './config.ts'
 import {
   mintToken, startBridgeServer, writeHandshakeFile, type SurfaceInfo,
 } from './bridge-server.ts'
@@ -72,11 +72,16 @@ export function apply(ctx: HostContext, config: Config): void {
     // Written only after `listen` succeeded: a handshake file pointing at a
     // port nobody serves is worse than no file at all.
     const removeHandshake = writeHandshakeFile(resolveHandshakePath(ctx, config.bridge.tokenFile), {
+      host: LOOPBACK_ADDRESS,
       port: server.port,
       origin: server.origin,
       token,
       protocol: PROTOCOL_VERSION,
       pid: process.pid,
+      // Absent, not empty, when unconfigured: the native half must be able to
+      // tell "no shell address published" from "an address that is the empty
+      // string", and it decides between waiting and its own env override.
+      ...(config.bridge.shellUrl === '' ? {} : { webUrl: config.bridge.shellUrl }),
     })
     return async () => {
       removeHandshake()

@@ -1,5 +1,5 @@
 /**
- * Surface manifest resolution — surface-manifest.md §4, all six rules.
+ * Surface manifest resolution — surface-manifest.md §4, all seven rules.
  *
  * The manifest is untrusted input from the host (bridge-contract.md §5), so it
  * is parsed before it is planned, and planning is a pure function of
@@ -14,12 +14,13 @@
  *   4. native/retired at `priority` (-1) .. {@link priorityOf}
  *   5. keys/ids override the parent mode .. {@link expandCells}
  *   6. declaring is claiming, no partial .. {@link resolveChildren}
+ *   7. takeover is bottom-up (G-2) ........ {@link resolveChildTakeover}
  */
 
-import type { SlotSpecLike, StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BridgeErrorCode, WireScope } from './bridge.ts'
 import type { Placement } from './native-slot.tsx'
 import { isRecord } from './payload.ts'
+import type { ChildrenTable, SlotSpecLike, StoredEntry } from './upstream.ts'
 
 /** Slot state machine (ARCHITECTURE.md §5, surface-manifest.md §2). */
 export type SlotMode = 'web' | 'mirrored' | 'native' | 'retired'
@@ -35,6 +36,16 @@ export const MIRRORED_PRIORITY = 1
 
 /** Priority a shadowing entry registers at by default: LOWER than the official 0 (rule 4). */
 export const DEFAULT_SHADOW_PRIORITY = -1
+
+/**
+ * Registrant label stamped on every Studio registration. It lives here rather
+ * than in the composition root because rule 7 reads it off the live ledger to
+ * recognise a cell Studio already took over.
+ */
+export const REGISTRANT = 'dsh-studio'
+
+/** Modes in which Studio owns the cell and renders the native truth. */
+export const OWNING_MODES: readonly SlotMode[] = ['native', 'retired']
 
 /** A manifest row without its `keys` / `ids` nesting (surface-manifest.md §2 `SlotEntrySelf`). */
 export interface SlotEntrySelf {
@@ -79,7 +90,7 @@ export interface CellRegistration {
   /** List cell id (`list` slots). */
   id?: string
   /** Child slots this registration declares itself (rule 6). */
-  children: Record<string, SlotSpecLike>
+  children: ChildrenTable
   /** Child slots already declared by the shadowed occupant, left in its ownership (rule 6). */
   inheritedChildren: string[]
 }
@@ -316,8 +327,31 @@ export function expandCells(
 
 /** Result of resolving rule 6 for one cell. */
 type ChildResolution =
-  | { ok: true; children: Record<string, SlotSpecLike>; inherited: string[]; notes: string[] }
+  | { ok: true; children: ChildrenTable; inherited: string[]; notes: string[] }
   | { ok: false; detail: string }
+
+/**
+ * The child slots a takeover of `slot` becomes responsible for: everything the
+ * live occupants declared, plus everything the pinned contract says they
+ * declare (the pin covers the load-order case where the official declarer has
+ * not applied yet).
+ *
+ * One source for rules 6 and 7 on purpose: rule 6 must declare exactly the set
+ * rule 7 demands be native, or the two rules could disagree about what a
+ * "child" is.
+ * @param slot - slot being taken over.
+ * @param env - live ledger view.
+ * @returns child name → the spec as found on the **live** ledger, or undefined
+ * when only the pin knows the name (nobody declared it yet).
+ */
+export function declaredChildrenOf(slot: string, env: SlotEnvironment): Map<string, SlotSpecLike | undefined> {
+  const children = new Map<string, SlotSpecLike | undefined>()
+  for (const name of env.pinned(slot)?.childNames ?? []) children.set(name, undefined)
+  for (const entry of env.entries(slot)) {
+    for (const [child, spec] of Object.entries(entry.children ?? {})) children.set(child, spec)
+  }
+  return children
+}
 
 /**
  * Rule 6 — "declaring is claiming". Winning a slot that declares child slots
@@ -342,20 +376,15 @@ export function resolveChildren(slot: string, mode: Exclude<SlotMode, 'web'>, en
   if (mode === 'mirrored') return { ok: true, children: {}, inherited: [], notes: [] }
 
   const pinned = env.pinned(slot)
-  const runtimeChildren = new Map<string, SlotSpecLike>()
-  for (const entry of env.entries(slot)) {
-    for (const [child, spec] of Object.entries(entry.children ?? {})) runtimeChildren.set(child, spec)
-  }
-  const required = new Set<string>([...runtimeChildren.keys(), ...(pinned?.childNames ?? [])])
-  if (required.size === 0) return { ok: true, children: {}, inherited: [], notes: [] }
+  const declared = declaredChildrenOf(slot, env)
+  if (declared.size === 0) return { ok: true, children: {}, inherited: [], notes: [] }
 
-  const children: Record<string, SlotSpecLike> = {}
+  const children: ChildrenTable = {}
   const inherited: string[] = []
   const notes: string[] = []
   const missing: string[] = []
 
-  for (const child of required) {
-    const runtimeSpec = runtimeChildren.get(child)
+  for (const [child, runtimeSpec] of declared) {
     const pinnedSpec = pinned?.childSpecs[child]
     if (runtimeSpec !== undefined && pinnedSpec !== undefined
       && (runtimeSpec.kind !== pinnedSpec.kind || runtimeSpec.scope !== pinnedSpec.scope)) {
@@ -394,6 +423,131 @@ export function resolveChildren(slot: string, mode: Exclude<SlotMode, 'web'>, en
     )
   }
   return { ok: true, children, inherited, notes }
+}
+
+/** Result of resolving rule 7 for one cell. */
+type TakeoverResolution =
+  | { ok: true; notes: string[] }
+  | { ok: false; detail: string }
+
+/** How much of a slot one manifest row hands to Studio. */
+export type RowOwnership = 'unlisted' | 'owned' | 'shared'
+
+/**
+ * Does a manifest row hand **every** cell of its slot to Studio?
+ *
+ * A row only counts as `owned` when its own mode is an owning mode AND no
+ * `keys` / `ids` override sends a cell back to `web` / `mirrored` (rule 5 lets
+ * them): a single official cell surviving inside a native parent is exactly the
+ * hole rule 7 exists to prevent.
+ * @param entry - the row, or undefined when the slot is unlisted (= web, rule 1).
+ * @returns `unlisted` | `owned` | `shared`.
+ */
+export function rowOwnership(entry: SlotEntry | undefined): RowOwnership {
+  if (entry === undefined) return 'unlisted'
+  const parentMode: SlotMode = entry.mode ?? 'web'
+  const overrides = [...Object.values(entry.keys ?? {}), ...Object.values(entry.ids ?? {})]
+  const modes: SlotMode[] = [parentMode, ...overrides.map(self => self.mode ?? parentMode)]
+  return modes.every(mode => OWNING_MODES.includes(mode)) ? 'owned' : 'shared'
+}
+
+/**
+ * Ledger evidence that Studio already holds a slot: an entry stamped
+ * {@link REGISTRANT} at a priority that is not the inert mirrored one.
+ *
+ * This is deliberately weaker than the manifest proof — it exists so a cell
+ * taken over by an earlier `surface/configure` (or by a Studio plugin that
+ * registered natively, outside any manifest) can still certify its parent.
+ * @param slot - child slot to check.
+ * @param env - live ledger view.
+ * @returns whether Studio owns an entry on that slot.
+ */
+function ledgerOwned(slot: string, env: SlotEnvironment): boolean {
+  return env.entries(slot).some(entry =>
+    entry.registrant === REGISTRANT && (entry.options.priority ?? 0) !== MIRRORED_PRIORITY)
+}
+
+/**
+ * Rule 7, recursive half: is `slot` (a child of something we are taking over)
+ * itself fully Studio-owned, all the way down?
+ * @param slot - child slot under scrutiny.
+ * @param manifest - the whole manifest (rule 7 is a graph rule, not a row rule).
+ * @param env - live ledger view.
+ * @param trail - path from the slot that triggered the check, for diagnostics
+ * and as a cycle guard.
+ * @returns ok plus notes, or the rejection detail.
+ */
+function takenOver(slot: string, manifest: Manifest, env: SlotEnvironment, trail: string[]): TakeoverResolution {
+  const ownership = rowOwnership(manifest[slot])
+  // The manifest proof is transitive: a native child whose own children are
+  // still web cannot certify its parent, because it will be rejected too.
+  if (ownership === 'owned') return childrenTakenOver(slot, manifest, env, trail)
+  if (ledgerOwned(slot, env)) {
+    return {
+      ok: true,
+      notes: [`${trail.join(' → ')}: accepted on ledger evidence (an entry of "${REGISTRANT}" already owns "${slot}")`],
+    }
+  }
+  const because = ownership === 'unlisted'
+    ? 'unlisted, so rule 1 leaves it to the official Web UI'
+    : `configured with at least one non-native cell (${SLOT_MODES.filter(mode => !OWNING_MODES.includes(mode)).join('/')})`
+  return {
+    ok: false,
+    detail: `child slot "${slot}" (${trail.join(' → ')}) is ${because}; `
+      + 'a native parent never mounts its official children, so take the child over first (rule 7 is bottom-up)',
+  }
+}
+
+/**
+ * Rule 7, iterating half: every declared child of `slot` must be Studio-owned.
+ * @param slot - slot being taken over.
+ * @param manifest - the whole manifest.
+ * @param env - live ledger view.
+ * @param trail - path walked so far (cycle guard).
+ * @returns ok plus notes, or the rejection detail.
+ */
+function childrenTakenOver(slot: string, manifest: Manifest, env: SlotEnvironment, trail: string[]): TakeoverResolution {
+  const notes: string[] = []
+  for (const child of declaredChildrenOf(slot, env).keys()) {
+    // Upstream allows exactly one declarer per slot, so a declaration cycle is
+    // not constructible; guarding anyway beats hanging on malformed input.
+    if (trail.includes(child)) continue
+    const owned = takenOver(child, manifest, env, [...trail, child])
+    if (!owned.ok) return owned
+    notes.push(...owned.notes)
+  }
+  return { ok: true, notes }
+}
+
+/**
+ * Rule 7 — "takeover is bottom-up" (G-2, surface-manifest.md §4).
+ *
+ * A `native` / `retired` parent wins the cell and renders one native view in
+ * place of the official React subtree. The child slots that subtree declared
+ * stay *declared* (rule 6 keeps the declarations alive) but nothing ever
+ * renders them: `renderSlot` is only called by the official component that no
+ * longer mounts. Accepting such a row would therefore delete official UI
+ * silently — the exact failure mode ARCHITECTURE.md §7 forbids.
+ *
+ * So a parent may only be taken over when every declared child is already
+ * Studio's: native/retired in this same manifest (checked recursively, leaves
+ * first) or held by {@link REGISTRANT} on the live ledger. `mirrored` is exempt
+ * — it never wins a cell, so it hides nothing.
+ * @param slot - slot being taken over.
+ * @param mode - resolved mode of the cell.
+ * @param manifest - the whole manifest, since ownership of a child lives in
+ * another row.
+ * @param env - live ledger view.
+ * @returns ok plus diagnostics, or the rejection detail naming the child that blocks it.
+ */
+export function resolveChildTakeover(
+  slot: string,
+  mode: Exclude<SlotMode, 'web'>,
+  manifest: Manifest,
+  env: SlotEnvironment,
+): TakeoverResolution {
+  if (mode === 'mirrored') return { ok: true, notes: [] }
+  return childrenTakenOver(slot, manifest, env, [slot])
 }
 
 /**
@@ -480,7 +634,15 @@ export function planManifest(manifest: Manifest, env: SlotEnvironment): Manifest
         rejected.push({ cell: draft.cell, slot, reason: 'slot_not_declared', detail: childResolution.detail })
         continue
       }
-      notes.push(...childResolution.notes)
+      // Rule 7 comes after rule 6 on purpose: rule 6 settles WHICH children the
+      // takeover owns, rule 7 checks they are all ours before the parent goes
+      // native. The manifest asked for something inconsistent, hence bad_payload.
+      const takeover = resolveChildTakeover(slot, draft.mode, manifest, env)
+      if (!takeover.ok) {
+        rejected.push({ cell: draft.cell, slot, reason: 'bad_payload', detail: takeover.detail })
+        continue
+      }
+      notes.push(...childResolution.notes, ...takeover.notes)
       if (draft.mode === 'mirrored') {
         // Upstream renders only the winning entry of a cell
         // (`SlotCore.entriesOfSlot`), so a +1 passenger never mounts and no

@@ -101,6 +101,29 @@ DeepSeek 的设计是 **「一切皆插件」**（Everything is a plugin），�
 
 当前提交只包含宣言、架构与迁移设计。桌面应用实现由后续工作完成。
 
+## 跑起来 / Running the studio profile
+
+Studio 不 fork dsh，也不改官方 `web` profile：它是**同一个官方壳 + 两行插件**。
+
+```sh
+npm install
+npm run bundle              # 产出 packages/*/lib（tsc → lib/types，tsdown → lib/index.js / lib/client.js）
+npm run studio:dump-config  # 只打印合成后的插件树，不启动
+npm run studio:web          # 启动 runtime（默认 http://127.0.0.1:3080）
+```
+
+三个 `studio:*` 脚本都先跑 [`scripts/studio-home.mjs`](./scripts/studio-home.mjs)：dsh 的 profile 住在 `$DSH_HOME/profiles/<name>`，不是仓库里，所以这个脚本把版本化的 [`profiles/studio/`](./profiles/studio) 连同**构建好的**两个插件安装到 `.dsh-home/`（已 gitignore），再把官方 `dsh` launcher 指过去。插件是**拷贝**而不是软链 —— 软链会让它们从本仓库的 `node_modules` 里解析出**第二份 cordis**，那样插件能挂载但拿不到 `apiProxy`。
+
+profile 的两层 bundle 是官方的 `@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app`，我们自己的层只 **insert 两行**（`studio-surface` / `studio-client`），一行官方 `ui-*` 都不 disable —— `npm run studio:dump-config` 与 `dsh --profile web --dump-config` 的行 id 列表逐行相同，只多这两行。manifest 住在 `profiles/studio/cordis.patch.yml` 的 `studio-surface.surface` 里，回滚 W1 就是把它改成 `mode: web`（[surface-manifest.md §6](./docs/surface-manifest.md)）。
+
+macOS 宿主：
+
+```sh
+cd apps/macos && ./scripts/package-app.sh && open ".build/bundle/DSH Studio.app"
+```
+
+宿主从 `$DSH_HOME/studio/bridge.json` 读端口、token 和官方壳地址（[bridge-contract.md §2.1](./docs/bridge-contract.md) 的字段表）。当前**还差最后一米**：宿主下发的 manifest 只有一行，会被规则 7 整条拒绝，界面回落官方 Web 侧边栏 —— 见 [known-gaps G-4 / G-5](./docs/known-gaps.md)。
+
 ## 文档 / Docs
 
 **设计 / Design**

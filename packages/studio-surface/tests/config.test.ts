@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { parseManifest, planManifest, type PinnedSlotContract, type SlotEnvironment } from '@dsh-studio/studio-client/src/client/manifest.ts'
-import type { SlotSpecLike, StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SlotSpecLike, StoredEntry } from '@dsh-studio/studio-client/src/client/upstream.ts'
 import { assertLoopback } from '../src/bridge-server.ts'
 import {
   Config, DEFAULT_BRIDGE_PORT, DEFAULT_RETENTION, LOOPBACK_ADDRESS,
@@ -36,11 +36,21 @@ const resolve = (raw: unknown): Config => new Config(raw as Config)
 describe('defaults', () => {
   test('an empty config is a running data channel and an untouched Web UI', () => {
     const config = resolve({})
-    assert.deepEqual(config.bridge, { port: DEFAULT_BRIDGE_PORT, retention: DEFAULT_RETENTION, tokenFile: '' })
+    assert.deepEqual(config.bridge, {
+      port: DEFAULT_BRIDGE_PORT, retention: DEFAULT_RETENTION, tokenFile: '', shellUrl: '',
+    })
     assert.deepEqual(config.surface, {})
     assert.equal(config.compareHotkey, 'opt+shift+d')
     assert.equal(DEFAULT_BRIDGE_PORT, 43180)
     assert.equal(LOOPBACK_ADDRESS, '127.0.0.1')
+  })
+
+  test('the shell URL is opt-in: unset publishes no webUrl at all (§2.1)', () => {
+    // The handshake carries what the deployment knows and nothing more. An
+    // invented default (127.0.0.1:3080) would make a native half load the wrong
+    // page on any run that moved the web bind.
+    assert.equal(resolve({}).bridge.shellUrl, '')
+    assert.equal(resolve({ bridge: { shellUrl: 'http://127.0.0.1:3080' } }).bridge.shellUrl, 'http://127.0.0.1:3080')
   })
 
   test('a listed row defaults to web / evacuated / -1', () => {
@@ -155,7 +165,9 @@ describe('host config and client parser agree (the contract seam)', () => {
   /** A ledger where `sidebar.workspaces` is declared and officially occupied. */
   const env = (pins: Record<string, PinnedSlotContract> = {}): SlotEnvironment => {
     const spec: SlotSpecLike = { kind: 'single', scope: 'root' }
-    const official: StoredEntry = { options: { priority: 0 }, registrant: 'ui-workspace' }
+    // `component` is required upstream: an entry is a component plus its
+    // options, and the planner reads the options only.
+    const official: StoredEntry = { component: () => null, options: { priority: 0 }, registrant: 'ui-workspace' }
     return {
       spec: slot => (slot === SLOT ? spec : undefined),
       entries: slot => (slot === SLOT ? [official] : []),

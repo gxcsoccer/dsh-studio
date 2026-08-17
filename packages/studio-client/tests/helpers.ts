@@ -10,12 +10,11 @@
  * `classifyRegisterFailure` reads those messages.
  */
 
-import type { Disposable } from '@deepseek-ai/cordis'
-import type {
-  LiveSlotNode, SlotSpecLike, StoredEntry,
-} from '@deepseek-ai/dsh-client-ui-slots'
-import type { ClientContext, ErasedRegisterOptions, SlotsService } from '@deepseek-ai/dsh-client-runtime/client'
 import type { BridgeTransport, TimerSeam } from '../src/client/bridge.ts'
+import type {
+  DynamicRegisterOptions, DynamicSlots, LiveSlotNode, SlotInjectionEffect, SlotSpecLike,
+  StoredEntry, StudioContext,
+} from '../src/client/upstream.ts'
 
 /** A control-channel envelope as it left the Web side. */
 export interface SentEnvelope {
@@ -90,8 +89,15 @@ interface FakeEntry extends StoredEntry {
   cell: string
 }
 
-/** The fake `ctx.slots`, plus the affordances a test needs. */
-export interface FakeSlots extends SlotsService {
+/**
+ * The fake `ctx.slots`, plus the affordances a test needs.
+ *
+ * It implements {@link DynamicSlots} — the same dynamically keyed face the
+ * production code consumes — so the double cannot drift from what Studio
+ * actually calls, while the drift guards in `upstream.ts` keep that face tied to
+ * the installed upstream package.
+ */
+export interface FakeSlots extends DynamicSlots {
   /** Model an official declaration (`children` of some registration upstream). */
   declare(slot: string, spec: SlotSpecLike, options?: { parent?: string }): void
   /** Model the official occupant of a slot. */
@@ -117,14 +123,27 @@ export function fakeSlots(): FakeSlots {
   const specs = new Map<string, SlotSpecLike>()
   const parents = new Map<string, string | undefined>()
   const entries: FakeEntry[] = []
-  const waiting = new Map<string, Array<{ callback: () => Disposable; dispose?: Disposable }>>()
+  const waiting = new Map<string, Array<{ callback: () => SlotInjectionEffect; dispose?: () => void }>>()
   const errorHooks = new Set<(key: string, entry: StoredEntry, error: unknown, info: { abdicated: boolean }) => void>()
+
+  /**
+   * Upstream accepts either a disposer or a generator yielding several from an
+   * injection body; the double normalizes both, so a test cannot pass something
+   * upstream would accept and the double would not.
+   * @param effect - what the injection callback returned.
+   * @returns one disposer.
+   */
+  const collect = (effect: SlotInjectionEffect): (() => void) => {
+    if (typeof effect === 'function') return effect
+    const disposers = [...effect]
+    return () => { for (const dispose of disposers.reverse()) dispose() }
+  }
 
   const declare = (slot: string, spec: SlotSpecLike, options: { parent?: string } = {}): void => {
     if (specs.has(slot)) throw new Error(`slot "${slot}" is already declared`)
     specs.set(slot, spec)
     parents.set(slot, options.parent)
-    for (const pending of waiting.get(slot) ?? []) pending.dispose = pending.callback()
+    for (const pending of waiting.get(slot) ?? []) pending.dispose = collect(pending.callback())
   }
 
   const undeclare = (slot: string): void => {
@@ -151,7 +170,7 @@ export function fakeSlots(): FakeSlots {
       }, () => null)
     },
 
-    register(options: ErasedRegisterOptions, component: unknown) {
+    register(options: DynamicRegisterOptions, component: unknown) {
       const spec = specs.get(options.name)
       if (spec === undefined) throw new Error(`slot "${options.name}" is not declared`)
       const priority = options.priority ?? 0
@@ -163,10 +182,11 @@ export function fakeSlots(): FakeSlots {
           + `(registered by ${clash.registrant ?? 'unknown'})`,
         )
       }
-      const declared: string[] = []
-      for (const [child, childSpec] of Object.entries(options.children ?? {})) {
-        declare(child, childSpec, { parent: options.name })
-        declared.push(child)
+      // Upstream refuses a duplicate child declaration before it records
+      // anything (`SlotCore.register`), so the double does too: a rejected
+      // registration must leave no trace at all.
+      for (const child of Object.keys(options.children ?? {})) {
+        if (specs.has(child)) throw new Error(`slot "${child}" is already declared`)
       }
       const entry: FakeEntry = {
         slot: options.name,
@@ -181,6 +201,16 @@ export function fakeSlots(): FakeSlots {
         ...(options.registrant === undefined ? {} : { registrant: options.registrant }),
       }
       entries.push(entry)
+      // Children are declared AFTER the entry is on the ledger, exactly as
+      // upstream does it (`rec.entries = next` precedes `notifyDeclaration`).
+      // The order is observable: declaring a child fires the injections waiting
+      // on it, so a takeover's own entry is always visible before the child
+      // registrations it unblocks.
+      const declared: string[] = []
+      for (const [child, childSpec] of Object.entries(options.children ?? {})) {
+        declare(child, childSpec, { parent: options.name })
+        declared.push(child)
+      }
       return () => {
         const index = entries.indexOf(entry)
         if (index >= 0) entries.splice(index, 1)
@@ -190,10 +220,10 @@ export function fakeSlots(): FakeSlots {
 
     inject(key, callback) {
       if (specs.has(key)) {
-        const dispose = callback()
+        const dispose = collect(callback())
         return () => { dispose() }
       }
-      const pending = { callback } as { callback: () => Disposable; dispose?: Disposable }
+      const pending: { callback: () => SlotInjectionEffect; dispose?: () => void } = { callback }
       const queue = waiting.get(key) ?? []
       queue.push(pending)
       waiting.set(key, queue)
@@ -262,8 +292,16 @@ export function fakeSlots(): FakeSlots {
   return service
 }
 
-/** A fake client context whose effects are inspectable and reversible. */
-export interface FakeContext extends ClientContext {
+/**
+ * A fake client context whose effects are inspectable and reversible.
+ *
+ * It extends {@link StudioContext}, not upstream's `ClientContext`: the latter
+ * *is* the whole Cordis context with every client service merged onto it, so a
+ * double would have to implement `typert`, `llm`, `remote`, `attachments` … to
+ * satisfy one call to `ctx.effect`. `upstream.ts` proves the real context
+ * satisfies the narrow face, which is what makes this double legitimate.
+ */
+export interface FakeContext extends StudioContext {
   slots: FakeSlots
   /** Labels of the effects still installed. */
   readonly effects: readonly string[]
@@ -277,25 +315,17 @@ export interface FakeContext extends ClientContext {
  * @returns the fake context.
  */
 export function fakeContext(slots: FakeSlots = fakeSlots()): FakeContext {
-  const installed = new Map<number, { label: string; dispose: () => void | Promise<void> }>()
+  const installed = new Map<number, { label: string; dispose: () => void }>()
   let next = 0
   const context: FakeContext = {
     slots,
-    effect(execute: () => Disposable | Promise<() => void | Promise<void>>, label = 'anonymous') {
+    // Only the synchronous shape, because that is all `StudioContext` exposes
+    // and all the client half installs: registrations and receivers. Cordis's
+    // async-effect branch belongs to the host half, which uses a real context.
+    effect(execute, label = 'anonymous') {
       next += 1
       const handle = next
-      const result = execute()
-      if (result instanceof Promise) {
-        // Mirrors cordis: an async effect body settles before its disposer is
-        // reachable, and the disposer itself is awaited.
-        const ready = result.then((dispose) => { installed.set(handle, { label, dispose }); return dispose })
-        return async () => {
-          const dispose = await ready
-          installed.delete(handle)
-          await dispose()
-        }
-      }
-      installed.set(handle, { label, dispose: result })
+      installed.set(handle, { label, dispose: execute() })
       return async () => {
         const entry = installed.get(handle)
         if (entry === undefined) return

@@ -76,6 +76,7 @@ export function bridgeError(code: BridgeErrorCode, message: string = code): Brid
 export const INBOUND_METHODS = [
   'surface/configure',
   'surface/reconfigure',
+  'surface/ping',
   'slot/invoke',
   'slot/probe',
 ] as const
@@ -86,6 +87,7 @@ export type InboundMethod = (typeof INBOUND_METHODS)[number]
 /** Web → Native event methods (§1.3, second table). */
 export const OUTBOUND_EVENTS = [
   'surface/ready',
+  'surface/pong',
   'slot/mount',
   'slot/props',
   'slot/rect',
@@ -114,6 +116,15 @@ export interface WireRect { x: number; y: number; w: number; h: number }
 /** Payload of each outbound event (§1.3). */
 export interface OutboundEventPayloads {
   'surface/ready': { protocol: number; slots: SurveyedSlot[] }
+  /**
+   * Liveness answer (§1.6). The **host** is the heartbeat's initiator: it sends
+   * `req surface/ping` every 10s and this half answers. The receipt of that
+   * request is the primary answer; this event is the equivalent one-way form the
+   * host also accepts, so a client half that wants to volunteer liveness
+   * outside a ping can do it without inventing a method. `seq` is echoed
+   * verbatim — the host uses it to notice an answer to an older beat.
+   */
+  'surface/pong': { seq: number }
   'slot/mount': {
     slot: string
     instanceId: string

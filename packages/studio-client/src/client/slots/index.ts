@@ -5,11 +5,21 @@
  */
 
 import type { PinnedSlotContract } from '../manifest.ts'
-import { SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_CONTRACT } from './sidebar-workspaces.ts'
+import {
+  SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_CONTRACT,
+  SIDEBAR_WORKSPACES_DIRECTORY_FLOW, SIDEBAR_WORKSPACES_DIRECTORY_FLOW_CONTRACT,
+} from './sidebar-workspaces.ts'
 
-/** All pinned contracts, keyed by slot name. */
+/**
+ * All pinned contracts, keyed by slot name.
+ *
+ * A wave contributes one row per slot it may take over — including the child
+ * holes of those slots, because rule 7 (takeover is bottom-up) means a parent
+ * row is only applicable when its children have rows too.
+ */
 export const PINNED_CONTRACTS: Readonly<Record<string, PinnedSlotContract>> = {
   [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT,
+  [SIDEBAR_WORKSPACES_DIRECTORY_FLOW]: SIDEBAR_WORKSPACES_DIRECTORY_FLOW_CONTRACT,
 }
 
 /**

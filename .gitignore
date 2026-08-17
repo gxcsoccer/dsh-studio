@@ -1,8 +1,17 @@
 node_modules/
 dist/
+# tsdown output: lib/index.js + lib/client.js + lib/types (tsc). Built artifact,
+# never committed — `npm run bundle` regenerates it, and the profile install
+# copies it into the dsh profile.
+lib/
 .DS_Store
 target/
 .dsh/
+# The materialized dogfood harness home (`scripts/studio-home.mjs`): a copy of
+# `profiles/studio/` plus the built plugins, plus everything dsh itself writes
+# there (storages, sessions, the profiles/node_modules fallback). The source of
+# truth is `profiles/studio/`, so this whole tree is disposable.
+.dsh-home/
 DerivedData/
 xcuserdata/
 .build/

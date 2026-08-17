@@ -1,0 +1,87 @@
+# The `studio` profile's own patch layer, applied after both bundle layers
+# (`@deepseek-ai/dsh-base`, then `@deepseek-ai/dsh-web-app`).
+#
+# WHAT THIS LAYER IS ALLOWED TO DO
+# --------------------------------
+# Add two rows and nothing else. The official `ui-*` client roster from
+# `dsh-web-app` stays exactly as upstream composed it: every takeover is a
+# registration at a lower priority on a slot the official code already
+# declared (ARCHITECTURE.md §3), so a Studio run must mount MORE plugins than
+# a plain `dsh web` run, never fewer. If you find yourself disabling an
+# official row here, the migration went wrong — that is the "silently deleting
+# official UI" failure ARCHITECTURE.md §7 forbids.
+#
+# Verify the composition without booting:
+#   npm run studio:dump-config
+# and count the rows it prints: the whole web roster plus `studio-surface` and
+# `studio-client`.
+
+- insert:
+    # ── host half: the surface manifest and the 127.0.0.1 data channel ───────
+    #
+    # A plain host row (it injects `apiProxy`, which the `api-gateway` row of
+    # the web bundle provides). It is inserted after the browser roster so the
+    # data channel binds only once the gateway it forwards to exists; the
+    # Loader's own dependency resolution is what actually orders activation.
+    - id: studio-surface
+      name: '@dsh-studio/studio-surface'
+      config:
+        bridge:
+          # bridge-contract.md §2.1: fixed port, loopback only, and the token
+          # file the native half reads. `43180` is the default; it is restated
+          # here because the native `BridgeDescriptor` defaults to the same
+          # number, and a silent divergence between the two is a "runtime
+          # offline" screen with no diagnostic.
+          port: 43180
+          # Published to the native half as the handshake's `webUrl` — the
+          # address it loads into its WKWebView. It must match what the
+          # `webserver` row actually binds: the web bundle's fallback is
+          # 127.0.0.1:3080, and `--port`/`--host` on the dsh invocation moves
+          # it, so a non-default launch has to restate this value (or export
+          # DSH_STUDIO_SHELL_URL on the app side, which wins over the file).
+          shellUrl: http://127.0.0.1:3080
+        # ── the W1 migration ledger (surface-manifest.md §1) ────────────────
+        #
+        # Two rows, bottom-up, because rule 7 (§4.7) is bottom-up: a `native`
+        # parent never mounts its official React subtree, so the child hole
+        # that subtree declared must already belong to Studio before the parent
+        # may be taken over. `sidebar.workspaces.directoryFlow` is the leaf, so
+        # it comes first — in the file and in the takeover order.
+        #
+        # Rolling W1 back is one line: set `mode: web` on both rows (or delete
+        # them) and the official sidebar renders again, no rebuild, no release
+        # (§6).
+        surface:
+          # The official occupant's directory-picker hole. `retired`, not
+          # `native`: the native workspaces view brings its own macOS folder
+          # picker, so the official dialog is no longer meaningful here — and
+          # `grep -c 'mode: retired'` is exactly the migration ledger
+          # (migration-ledger.md).
+          sidebar.workspaces.directoryFlow:
+            mode: retired
+            placement: evacuated
+            priority: -1
+          # W1's actual target: the workspaces section of the sidebar.
+          sidebar.workspaces:
+            mode: native
+            placement: evacuated
+            priority: -1
+
+    # ── browser half: the client plugin the shell fetches ────────────────────
+    #
+    # A `dsh.client` row: its node half is an empty `apply` (the row exists so
+    # `dsh-client-modules` scans it into `window.__DSH_BOOT__` and serves
+    # `/plugins/studio-client/client.js`), and its browser half installs the
+    # native-slot proxies over the official `ui-slots` priority seam.
+    #
+    # Outside the Studio WKWebView it stays inert on purpose (ADR-0004): open
+    # the same URL in Safari and the official UI renders untouched, which is
+    # what makes this row safe to leave mounted.
+    - id: studio-client
+      name: '@dsh-studio/studio-client'
+      config:
+        # Bridge diagnostics in the browser console. On during dogfood: the
+        # first question of every W1 session is "did the handshake happen",
+        # and it must be answerable from the console, not guessed. Payloads
+        # are never logged (bridge-contract.md §5).
+        diagnostics: true

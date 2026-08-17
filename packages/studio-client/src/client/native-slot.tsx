@@ -43,10 +43,14 @@ export const ORCHESTRATION_KEYS: ReadonlySet<string> = new Set([
 
 /**
  * Project props onto the orchestration share.
- * @param props - composed props handed to the entry by the framework.
+ * @param props - composed props handed to the entry by the framework. Typed
+ * `object` rather than `Record<string, unknown>` because upstream's composed
+ * props are intersections of *interfaces* and therefore have no implicit index
+ * signature — a record-typed parameter would refuse the real props (see
+ * {@link ProxyProps}).
  * @returns only whitelisted, JSON-safe members.
  */
-export function serializeOrchestration(props: Record<string, unknown>): Record<string, unknown> {
+export function serializeOrchestration(props: object): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(props)) {
     if (typeof value === 'function') continue      // callbacks ride slot/invoke
@@ -120,8 +124,25 @@ export interface NativeSlotOptions {
   key?: string
 }
 
-/** Props a slot component receives: an opaque record as far as the proxy cares. */
-export type ProxyProps = Record<string, unknown>
+/**
+ * Props a slot component receives, as narrowly as the proxy can state them.
+ *
+ * The proxy never reads a member by name — it only *iterates* the bag — so the
+ * ideal type would be `object`. It declares `renderSlot` anyway because
+ * upstream's `register` runs a `RendersCheck<C, D>`: an entry that declares
+ * child slots must consume `renderSlot`, or the component type is rejected. A
+ * `Record<string, unknown>` would satisfy that check too, but it cannot *accept*
+ * upstream's composed props (an intersection of interfaces has no implicit index
+ * signature), so this is the shape that passes both directions.
+ *
+ * That the proxy accepts `renderSlot` without calling it is exactly why manifest
+ * rule 7 exists: a native parent renders no official child, so every declared
+ * child must already be Studio's before the takeover is allowed.
+ */
+export interface ProxyProps {
+  /** Upstream's child-render seat. Never invoked here (see above). */
+  renderSlot?: unknown
+}
 
 /**
  * Build the proxy component of one registration.

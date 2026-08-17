@@ -18,6 +18,25 @@ surface manifest 是这套架构的**控制面**：一张 `插槽 → 状态` �
 
 第三条尤其重要。官方 patch 规则是「按 `id` 瞄准配置里的一行并整份替换该行的 config」，所以只要 manifest 是我们插件的 `Config`，用户在自己 profile 的 `cordis.patch.yml` 里就能覆盖它 —— 这是官方给的机制，我们只要不把配置藏进代码就能白拿。
 
+### 1.1 谁读这份表：**runtime 那份才是权威**（G-4）
+
+这条不变量只有在「**全链路只有一份表**」时才成立，所以流向必须写死：
+
+```
+profiles/studio/cordis.patch.yml (studio-surface.surface)   ← 用户改的就是这一行
+        │  插件 Config
+        ▼
+GET /studio/surface  { protocol, manifest, compareHotkey, census }
+        │  宿主在收到 surface/ready 之后、发 surface/configure 之前取一次
+        ▼
+SurfaceCoordinator.manifest ──surface/configure──▶ studio-client
+```
+
+- 宿主**不得**把自己编译进去的表当权威。`SurfaceManifest.w1Default` 只是「runtime 未起 / 404 / token 失效」时的兜底，而且兜底那份也必须自身满足第 7 条。
+- 采纳结果有三态，都会记进日志（`manifestAdopted`）：`runtimeAuthority`（采纳）、`compiledFallback`（没取到）、`rejectedRuntime`（取到了但它要求的原生实现宿主没有 —— 用户写错一行 YAML 只该被拒，不该让 app 起不来）。
+- 于是「改一行 YAML 就能热回滚」是真的：不重编 Swift、不发版。
+
+
 ---
 
 ## 2. Schema
@@ -116,10 +135,15 @@ surface:
 4. `mode: native` / `retired` → 注册在 `priority`（默认 `-1`）赢下 cell；原生侧渲染真身。
 5. `keys` / `ids` 的条目**覆盖**父级 `mode`；父级 `mode` 作为未列出 key/id 的默认。
 6. 若该插槽声明了子插槽且我们赢下了它，则**必须原样声明全部子插槽**（见 [migration-playbook.md §②](./migration-playbook.md)）。缺一个 → 拒绝该条目并回 `rejected`，**不 partial 应用**。
+7. **接管必须自下而上**（G-2）：`native` / `retired` 的插槽，只有在它**全部已声明子槽**都已归 Studio 时才允许接管 —— 「归 Studio」= 同一份 manifest 里该子槽也是 `native`/`retired`（递归，叶子先判），或活账本上该子槽已被 `registrant: dsh-studio` 的条目占有。任一子槽仍是 `web` / 未列出 / `mirrored` → 拒绝该行，`reason: bad_payload`，detail 指名是哪个子槽卡住的。`mirrored` 自身豁免这条（它永不赢 cell，什么也没藏起来）。
 
 第 3 条是 `mirrored` 能成立的技巧：用**更高**的 priority 注册反而是「陪跑」—— 官方仍渲染，我们只借生命周期拿数据。这完全在官方语义内，不需要任何额外机制。
 
 第 6 条的「不 partial 应用」很重要：宁可这个插槽整条不生效并大声报告，也不要半生效把 UI 搞成一半原生一半空白。
+
+第 7 条的理由是官方渲染链的一个硬事实：原生父视图赢下 cell 后，官方那棵 React 子树**不再挂载**，于是它内部的 `renderSlot()` 永不执行 —— 子槽虽然还「声明」着（第 6 条让声明活着），却再也没有人渲染它。接受这样一行等于**静默删掉一块官方 UI**。所以 W1 刻意只接管 `sidebar.workspaces`，父槽 `sidebar` 保持 `web`（见 [known-gaps.md G-2](./known-gaps.md)）。
+
+第 7 条有个直接推论，宿主侧必须照它实现（G-5）：既然被接管父槽下的子槽行永不被渲染，那它们就是**暗槽（dark hole）—— 声明，不是实现**。宿主的启动自检、契约漂移判定、「全部被拒就降级」三处，都只对「要装配视图**且不是暗槽**」的那些行较真（Swift 侧口径：`SurfaceManifest.slotsRequiringNativeView`）。反过来说，`retired` 本身仍然是「由我们渲染」的语义（[ARCHITECTURE.md §5](../ARCHITECTURE.md)）：叶子槽标 `retired` 就必须有原生实现，只有暗槽才豁免。
 
 ---
 

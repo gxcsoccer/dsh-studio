@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Same layout as the client package (and as upstream's packages): tsc emits
+    // lib/types, tsdown bundles lib/types/index.js into lib/index.js.
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "noEmit": false,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src"]
+}

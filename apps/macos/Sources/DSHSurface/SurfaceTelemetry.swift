@@ -22,6 +22,19 @@ public protocol SurfaceTelemetry: AnyObject, Sendable {
     func orchestrationDropped(_ note: String)
     /// **ADR-0002 的告警口**：控制通道上出现了白名单外的字段（= 领域数据）。
     func domainDataRejected(slot: String, keys: [String])
+    /// 心跳丢拍（known-gaps.md G-3）。默认实现为空 —— 加这条不该逼所有
+    /// 既有 conformer 改代码。
+    func heartbeatMissed(misses: Int, detail: String)
+    /// 这一轮用的是哪份 manifest（known-gaps.md G-4）。默认实现为空。
+    ///
+    /// dogfood 的第一个问题是「宿主到底按哪份表接管的」，它必须能从日志回答，
+    /// 而不是从屏幕上猜。
+    func manifestAdopted(origin: String, slots: [String])
+}
+
+extension SurfaceTelemetry {
+    public func heartbeatMissed(misses: Int, detail: String) {}
+    public func manifestAdopted(origin: String, slots: [String]) {}
 }
 
 /// 默认实现：写 `os.Logger`。诊断模式外不落 payload（bridge-contract.md §5）。
@@ -60,6 +73,16 @@ public final class LoggingSurfaceTelemetry: SurfaceTelemetry {
         logger.debug("dropped orchestration event: \(note, privacy: .public)")
     }
 
+    public func heartbeatMissed(misses: Int, detail: String) {
+        // 丢一拍是 warning（可能是一次 GC 卡顿）；判死由协调器的 degraded 上报。
+        logger.warning("control channel missed \(misses, privacy: .public) heartbeat(s): \(detail, privacy: .public)")
+    }
+
+    public func manifestAdopted(origin: String, slots: [String]) {
+        // notice 级：这一行是 dogfood 日志里最常被 grep 的一行。
+        logger.notice("surface manifest: \(origin, privacy: .public); native slots: \(slots.joined(separator: ","), privacy: .public)")
+    }
+
     public func domainDataRejected(slot: String, keys: [String]) {
         // 这条必须是 error 级：它意味着有人开始往控制通道上塞领域数据，
         // 而那是终局重写的第一步（ADR-0002 的硬性 review 项）。
@@ -77,6 +100,9 @@ public enum DegradationReason: Hashable, Sendable, CustomStringConvertible {
     case configureFailed(String)
     /// 上游插槽表漂移到我们不认识的程度。
     case contractDrift(SlotContractDrift)
+    /// **G-3**：运行期心跳连续 `misses` 拍无 `surface/pong` → client 半半静默
+    /// 死亡。动作与崩溃退位对齐：撤下所有原生插槽视图，让官方 Web UI 接管。
+    case controlLinkLost(misses: Int, interval: Duration)
 
     public var description: String {
         switch self {
@@ -88,6 +114,8 @@ public enum DegradationReason: Hashable, Sendable, CustomStringConvertible {
             "surface/configure failed: \(detail)"
         case .contractDrift(let drift):
             drift.description
+        case .controlLinkLost(let misses, let interval):
+            "no surface/pong for \(misses) consecutive pings (every \(interval)) — client half is half-dead"
         }
     }
 }

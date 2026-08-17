@@ -90,6 +90,7 @@ Web  → Native   { v:1, t:"res", id:"…", ok:true, p:{ applied:[...], rejected
 | --- | --- | --- |
 | `surface/configure` | `{ manifest }` | 下发 surface manifest，client 据此决定注册哪些遮蔽条目 |
 | `surface/reconfigure` | `{ patch }` | 运行时改单个插槽的 `mode`，用于对照与热回退（**不重启，不刷新页面**） |
+| `surface/ping` | `{ seq, sentAt }` | 运行期活体探测（§1.6）。**宿主是发起方**，10s 一拍；`seq` 单调递增，`sentAt` 是宿主时钟（epoch 秒）。client 必须回执 `{ seq, sentAt }`（原样回抄），回执本身就是活体证据 |
 | `slot/invoke` | `{ slot, instanceId, action, args }` | 原生视图上的用户动作回灌到 Web 侧的注入面（例如点原生侧栏的「新会话」→ 调 `ctx.workspaces.startSession`） |
 | `slot/probe` | `{ slot }` | 查询某插槽当前占有者与 priority，用于诊断 |
 
@@ -98,6 +99,7 @@ Web  → Native   { v:1, t:"res", id:"…", ok:true, p:{ applied:[...], rejected
 | 方法 | payload | 语义 |
 | --- | --- | --- |
 | `surface/ready` | `{ protocol, slots[] }` | 握手 |
+| `surface/pong` | `{ seq }` | `surface/ping` 的**等价单向形式**（§1.6）。宿主两种形态都算活体证据；client 半在两拍之间想主动证明自己还活着时用它，不必发明新方法 |
 | `slot/mount` | `{ slot, instanceId, key?, scope, props }` | 一个遮蔽条目被渲染了，原生该装配对应视图 |
 | `slot/props` | `{ instanceId, props }` | props 变化（已做浅 diff，只发变化字段） |
 | `slot/rect` | `{ instanceId, rect:{x,y,w,h}, scrollable }` | 几何上报，**仅 overlay 落位需要** |
@@ -118,6 +120,31 @@ Web  → Native   { v:1, t:"res", id:"…", ok:true, p:{ applied:[...], rejected
 - 错误码是封闭集合：`unknown_method` / `bad_payload` / `protocol_mismatch` / `slot_not_declared` / `slot_not_mounted` / `priority_conflict` / `internal`。
 - `priority_conflict` 专指官方 `register` 在同 cell 同 priority 抛错的情况（官方会指名占有者）。这条错误必须**大声失败**：它意味着上游或另一个插件也占了我们的 priority，配置需要人来决策，不能自动挪位。
 
+### 1.6 心跳与运行期失联（G-3）
+
+握手 watchdog 只覆盖启动期。运行期 client 半可能**静默死亡**（JS 异常卡住事件循环、页面被系统回收而 WKWebView 实例仍在），此时原生插槽视图还在显示，但 `slot/invoke` 全部无效 —— **用户点得到、点了没反应**，比白屏更糟。
+
+因此心跳的方向不是对称的，**宿主是发起方**：
+
+```jsonc
+// Native → Web，每 10s 一拍
+{ "v":1, "t":"req", "id":"01J…", "m":"surface/ping", "p":{ "seq":7, "sentAt":1755000000 } }
+// Web → Native，主格式：普通回执（回执本身就是活体证据）
+{ "v":1, "t":"res", "id":"01J…", "ok":true, "p":{ "seq":7, "sentAt":1755000000 } }
+// Web → Native，等价单向形式（宿主同样认）
+{ "v":1, "t":"evt", "m":"surface/pong", "p":{ "seq":7 } }
+```
+
+| 项 | 值 | 依据 |
+| --- | --- | --- |
+| 发起方 | 宿主（native），client 半只回答 | 只有监督方能发现对端静默死亡；死掉的事件循环无法自我上报 |
+| 间隔 | 10s | `SurfaceHeartbeat.interval` |
+| 判死阈值 | 连续 2 拍无任何回应 | `SurfaceHeartbeat.missThreshold` |
+| 丢 1 拍 | `suspect` 态：宿主把原生插槽**置灰禁用**，并显示提示 | 「可交互但通道失联」必须画出来，不许静默失效 |
+| 判死动作 | **撤下所有原生插槽视图，官方 Web UI 接管**（与崩溃退位对齐，ADR-0004） | 判死后不自动复活：自动回摆会让界面在两种实现之间抖动 |
+
+client 半的义务只有一条：**`surface/ping` 的处理器必须在插件整个生命周期内保持安装**。未安装的处理器会回 `unknown_method`，宿主把它读成一次丢拍 —— 两拍即判死。`seq` 原样回抄，宿主用它识别「对端在回旧拍」（`staleReplyCount`）。
+
 ---
 
 ## 2. 数据通道
@@ -127,6 +154,22 @@ Web  → Native   { v:1, t:"res", id:"…", ok:true, p:{ applied:[...], rejected
 - 只绑 `127.0.0.1`，**永不 `0.0.0.0`**。端口来自 `Config`，默认 `43180`，占用则失败退出而不是自动换端口（换端口会让宿主找不到）。
 - 在 `apply(ctx)` 中用 `ctx.effect(() => { const srv = listen(); return () => srv.close() })` 开启；插件卸载 / profile 热替换时端口必须干净归还。
 - 认证：启动时生成一次性 token 写入 `$DSH_HOME/studio/bridge.json`（`0600`），宿主读文件取 token，每个请求带 `Authorization: Bearer`。loopback 也要认证 —— 同机其他进程不该能驱动用户的 agent。
+
+**握手文件字段表**（`$DSH_HOME/studio/bridge.json`，`studio-surface` 写、宿主读）。这张表原本缺失，宿主侧因此只能自己猜一套字段名（`BridgeDescriptor.swift` 里标了「契约缺口」）—— 猜错的代价是「runtime offline」而没有任何诊断信息，所以现在钉死在这里：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `host` | string | 绑定地址，恒为 `127.0.0.1`（代码断言，不是配置项，见 §5）。宿主对非 loopback 值**拒绝连接** |
+| `port` | number | 数据通道端口，默认 `43180` |
+| `origin` | string | `http://<host>:<port>`，同一信息的预拼形式 |
+| `token` | string | 一次性 Bearer token（256 bit hex）。缺失或为空 → 宿主拒绝以未认证方式通信 |
+| `protocol` | number | 控制通道协议版本，与 `surface/ready` 里的 `protocol` 同源（§1.2） |
+| `pid` | number | 写文件的 dsh 进程号，仅用于诊断「文件是谁留下的」 |
+| `webUrl` | string?（可选） | 官方 Web 壳地址，宿主 WKWebView 要加载的那一个。来自 `studio-surface` 的 `bridge.shellUrl` 配置；**未配置时整个字段不出现**（不是空串），宿主据此区分「还没发布」与「发布了一个空地址」，并退回自己的 `DSH_STUDIO_SHELL_URL` 环境变量 |
+
+`webUrl` 是配置而不是插件自己推导的值：浏览器该用哪个地址由 web bundle 的 `webserver` 行、反向代理、SSH 隧道共同决定，只注入 `apiProxy` 的插件无从得知。写死一个 `127.0.0.1:3080` 默认值会让任何改了 bind 的运行**加载错误的页面**，那比没有地址更糟。
+
+文件在 `listen` 成功之后才写、插件卸载时删除：指向没人监听的端口的握手文件比没有文件更坏。
 
 ### 2.2 面向原生的两类端点
 

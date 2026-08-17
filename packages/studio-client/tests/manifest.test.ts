@@ -5,15 +5,37 @@
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import type { SlotSpecLike } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SlotSpecLike } from '../src/client/upstream.ts'
 import {
-  DEFAULT_SHADOW_PRIORITY, MIRRORED_PRIORITY, classifyRegisterFailure, createManifestController,
-  parseManifest, planManifest, priorityOf,
+  DEFAULT_SHADOW_PRIORITY, MIRRORED_PRIORITY, REGISTRANT, classifyRegisterFailure,
+  createManifestController, declaredChildrenOf, parseManifest, planManifest, priorityOf, rowOwnership,
   type CellRegistration, type Manifest, type ManifestRuntime, type PinnedSlotContract,
-  type SlotEnvironment,
+  type SlotEnvironment, type SlotMode,
 } from '../src/client/manifest.ts'
-import { SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_CONTRACT, SIDEBAR_WORKSPACES_DIRECTORY_FLOW } from '../src/client/slots/index.ts'
+import {
+  SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_CONTRACT,
+  SIDEBAR_WORKSPACES_DIRECTORY_FLOW, SIDEBAR_WORKSPACES_DIRECTORY_FLOW_CONTRACT,
+} from '../src/client/slots/index.ts'
 import { fakeSlots, type FakeSlots } from './helpers.ts'
+
+/** Both W1 pins, as `index.ts` hands them to the resolver in production. */
+const W1_PINS: Record<string, PinnedSlotContract> = {
+  [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT,
+  [SIDEBAR_WORKSPACES_DIRECTORY_FLOW]: SIDEBAR_WORKSPACES_DIRECTORY_FLOW_CONTRACT,
+}
+
+/**
+ * The W1 manifest, as rule 7 forces it to be written: the section cannot be
+ * taken over while its declared child hole is still official, so every fixture
+ * that takes the section over lists the hole as well.
+ * @param mode - mode of the section row.
+ * @param child - mode of the child hole row.
+ * @returns the two-row manifest.
+ */
+const w1 = (mode: SlotMode = 'native', child: SlotMode = 'retired'): Manifest => ({
+  [SIDEBAR_WORKSPACES]: { mode },
+  [SIDEBAR_WORKSPACES_DIRECTORY_FLOW]: { mode: child },
+})
 
 const SINGLE: SlotSpecLike = { kind: 'single', scope: 'root' }
 const KEYED: SlotSpecLike = { kind: 'keyed', scope: 'session' }
@@ -114,11 +136,10 @@ describe('rule 1 — an unlisted slot is web', () => {
   })
 
   test('an undeclared but pinned slot plans anyway: registration is deferred', () => {
-    const plan = planManifest(
-      { [SIDEBAR_WORKSPACES]: { mode: 'native' } },
-      envOf(fakeSlots(), { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }),
-    )
-    assert.equal(plan.registrations.length, 1)
+    const plan = planManifest(w1(), envOf(fakeSlots(), W1_PINS))
+    assert.deepEqual(plan.registrations.map(registration => registration.cell), [
+      SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_DIRECTORY_FLOW,
+    ])
     assert.match(plan.notes.join('\n'), /registration is deferred/)
   })
 })
@@ -180,15 +201,15 @@ describe('rule 4 — native and retired take the cell at priority -1', () => {
 
   test('the placement defaults to evacuated, the form that needs no geometry', () => {
     const slots = officialSidebar()
-    const plan = planManifest({ [SIDEBAR_WORKSPACES]: { mode: 'retired' } }, envOf(slots))
+    const plan = planManifest(w1('retired'), envOf(slots))
     assert.equal(plan.registrations[0]?.placement, 'evacuated')
     assert.equal(plan.registrations[0]?.mode, 'retired')
   })
 
   test('the official entry stays registered underneath (ADR-0004 fallback)', () => {
     const slots = officialSidebar()
-    const runtime = runtimeOf(envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }))
-    createManifestController(runtime).configure({ [SIDEBAR_WORKSPACES]: { mode: 'native' } })
+    const runtime = runtimeOf(envOf(slots, W1_PINS))
+    createManifestController(runtime).configure(w1())
     assert.equal(slots.entries(SIDEBAR_WORKSPACES).length, 1)
     assert.equal(runtime.installed[0]?.priority, -1)
   })
@@ -262,10 +283,7 @@ describe('rule 5 — keys and ids override the parent mode', () => {
 describe('rule 6 — declaring is claiming, and there is no partial application', () => {
   test('a child the shadowed occupant declared is inherited, not re-declared', () => {
     const slots = officialSidebar()
-    const plan = planManifest(
-      { [SIDEBAR_WORKSPACES]: { mode: 'retired' } },
-      envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }),
-    )
+    const plan = planManifest(w1('retired'), envOf(slots, W1_PINS))
     assert.deepEqual(plan.registrations[0]?.children, {})
     assert.deepEqual(plan.registrations[0]?.inheritedChildren, [SIDEBAR_WORKSPACES_DIRECTORY_FLOW])
     assert.match(plan.notes.join('\n'), /inherited child declaration/)
@@ -274,10 +292,7 @@ describe('rule 6 — declaring is claiming, and there is no partial application'
   test('a child nobody declared is declared verbatim from the pin', () => {
     const slots = fakeSlots()
     slots.declare(SIDEBAR_WORKSPACES, SINGLE)
-    const plan = planManifest(
-      { [SIDEBAR_WORKSPACES]: { mode: 'native' } },
-      envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }),
-    )
+    const plan = planManifest(w1(), envOf(slots, W1_PINS))
     assert.deepEqual(plan.registrations[0]?.children, {
       [SIDEBAR_WORKSPACES_DIRECTORY_FLOW]: { kind: 'single', scope: 'root' },
     })
@@ -311,12 +326,124 @@ describe('rule 6 — declaring is claiming, and there is no partial application'
     const slots = fakeSlots()
     slots.declare(SIDEBAR_WORKSPACES, SINGLE)
     slots.occupy(SIDEBAR_WORKSPACES, { by: 'ui-workspace', children: { [SIDEBAR_WORKSPACES_DIRECTORY_FLOW]: KEYED } })
-    const plan = planManifest(
-      { [SIDEBAR_WORKSPACES]: { mode: 'native' } },
-      envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }),
-    )
+    const plan = planManifest(w1(), envOf(slots, W1_PINS))
+    // Both rows go: the section because its child drifted, the child row itself
+    // because the live spec is not the one we pinned.
     assert.deepEqual(plan.registrations, [])
+    assert.deepEqual(plan.rejected.map(rejection => rejection.slot), [
+      SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_DIRECTORY_FLOW,
+    ])
     assert.match(String(plan.rejected[0]?.detail), /drifted from the pinned contract/)
+  })
+})
+
+describe('rule 7 — takeover is bottom-up (G-2)', () => {
+  test('the section cannot go native while its declared hole is still official', () => {
+    const slots = officialSidebar()
+    const plan = planManifest({ [SIDEBAR_WORKSPACES]: { mode: 'native' } }, envOf(slots, W1_PINS))
+    assert.deepEqual(plan.registrations, [])
+    assert.equal(plan.rejected[0]?.reason, 'bad_payload')
+    assert.match(String(plan.rejected[0]?.detail), /take the child over first/)
+    assert.match(String(plan.rejected[0]?.detail), /sidebar\.workspaces\.directoryFlow/)
+  })
+
+  test('the pin alone is enough to know a child exists: an empty ledger is no excuse', () => {
+    // Nothing is registered yet, so nothing would visibly break — and the rule
+    // still refuses, because occupancy is a race and the declaration is not.
+    const slots = fakeSlots()
+    slots.declare(SIDEBAR_WORKSPACES, SINGLE)
+    const plan = planManifest({ [SIDEBAR_WORKSPACES]: { mode: 'native' } }, envOf(slots, W1_PINS))
+    assert.deepEqual(plan.registrations, [])
+    assert.match(String(plan.rejected[0]?.detail), /unlisted/)
+  })
+
+  test('listing the child native/retired unlocks the parent, and both are applied', () => {
+    const slots = officialSidebar()
+    const runtime = runtimeOf(envOf(slots, W1_PINS))
+    const result = createManifestController(runtime).configure(w1('native', 'retired'))
+    assert.deepEqual(result.rejected, [])
+    assert.deepEqual(result.applied, [SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_DIRECTORY_FLOW])
+  })
+
+  test('a child left web, or merely mirrored, still blocks the parent', () => {
+    const slots = officialSidebar()
+    for (const child of ['web', 'mirrored'] as const) {
+      const plan = planManifest(w1('native', child), envOf(slots, W1_PINS))
+      assert.equal(plan.registrations.some(registration => registration.slot === SIDEBAR_WORKSPACES), false)
+      assert.match(String(plan.rejected[0]?.detail), /non-native cell/)
+    }
+  })
+
+  test('one official cell of a keyed child is enough to block it', () => {
+    const slots = fakeSlots()
+    slots.declare('panel', SINGLE)
+    slots.occupy('panel', { by: 'official', children: { 'panel.tabs': KEYED } })
+    slots.occupy('panel.tabs', { key: 'left', by: 'official' })
+    slots.occupy('panel.tabs', { key: 'right', by: 'official' })
+    const plan = planManifest({
+      panel: { mode: 'native' },
+      // Rule 5 sends `right` back to the official renderer, so the hole is only
+      // half ours and the parent must not hide the other half.
+      'panel.tabs': { mode: 'native', keys: { right: { mode: 'web' } } },
+    }, envOf(slots))
+    assert.deepEqual(plan.registrations.map(registration => registration.cell), ['panel.tabs#key=left'])
+    assert.equal(plan.rejected[0]?.cell, 'panel')
+  })
+
+  test('the check is transitive: a native child with a web grandchild takes the parent down too', () => {
+    const slots = fakeSlots()
+    slots.declare('panel', SINGLE)
+    slots.occupy('panel', { by: 'official', children: { 'panel.body': SINGLE } })
+    slots.occupy('panel.body', { by: 'official', children: { 'panel.body.footer': SINGLE } })
+    const plan = planManifest({
+      panel: { mode: 'native' },
+      'panel.body': { mode: 'native' },
+    }, envOf(slots))
+    assert.deepEqual(plan.registrations, [])
+    assert.deepEqual(plan.rejected.map(rejection => rejection.cell), ['panel', 'panel.body'])
+    assert.match(String(plan.rejected[0]?.detail), /panel → panel\.body → panel\.body\.footer/)
+  })
+
+  test('a cell Studio already holds on the ledger certifies its parent', () => {
+    const slots = officialSidebar()
+    // A previous configure (or a Studio plugin registering natively) already
+    // owns the hole; the manifest need not say so again.
+    slots.occupy(SIDEBAR_WORKSPACES_DIRECTORY_FLOW, { priority: DEFAULT_SHADOW_PRIORITY, by: REGISTRANT })
+    const plan = planManifest({ [SIDEBAR_WORKSPACES]: { mode: 'native' } }, envOf(slots, W1_PINS))
+    assert.deepEqual(plan.registrations.map(registration => registration.cell), [SIDEBAR_WORKSPACES])
+    assert.match(plan.notes.join('\n'), /ledger evidence/)
+  })
+
+  test('a mirrored Studio entry is not ownership: it never wins the cell', () => {
+    const slots = officialSidebar()
+    slots.occupy(SIDEBAR_WORKSPACES_DIRECTORY_FLOW, { priority: MIRRORED_PRIORITY, by: REGISTRANT })
+    const plan = planManifest({ [SIDEBAR_WORKSPACES]: { mode: 'native' } }, envOf(slots, W1_PINS))
+    assert.deepEqual(plan.registrations, [])
+  })
+
+  test('a mirrored parent is exempt: a passenger hides nothing', () => {
+    const slots = officialSidebar()
+    const plan = planManifest({ [SIDEBAR_WORKSPACES]: { mode: 'mirrored' } }, envOf(slots, W1_PINS))
+    assert.equal(plan.registrations.length, 1)
+    assert.deepEqual(plan.rejected, [])
+  })
+
+  test('rules 6 and 7 read one child set, so they cannot disagree', () => {
+    const slots = officialSidebar()
+    const env = envOf(slots, W1_PINS)
+    assert.deepEqual([...declaredChildrenOf(SIDEBAR_WORKSPACES, env).keys()], [SIDEBAR_WORKSPACES_DIRECTORY_FLOW])
+    // The pin knows the name even when the ledger does not.
+    assert.deepEqual([...declaredChildrenOf(SIDEBAR_WORKSPACES, envOf(fakeSlots(), W1_PINS)).keys()],
+      [SIDEBAR_WORKSPACES_DIRECTORY_FLOW])
+  })
+
+  test('ownership of a row is all-or-nothing across its cells', () => {
+    assert.equal(rowOwnership(undefined), 'unlisted')
+    assert.equal(rowOwnership({ mode: 'native' }), 'owned')
+    assert.equal(rowOwnership({ mode: 'retired', keys: { a: {} } }), 'owned')
+    assert.equal(rowOwnership({ mode: 'native', ids: { a: { mode: 'web' } } }), 'shared')
+    assert.equal(rowOwnership({ keys: { a: { mode: 'native' } } }), 'shared')
+    assert.equal(rowOwnership({ mode: 'web' }), 'shared')
   })
 })
 
@@ -325,10 +452,10 @@ describe('failing loud (§1.5)', () => {
     const slots = officialSidebar()
     // Another plugin already sits at -1.
     slots.occupy(SIDEBAR_WORKSPACES, { priority: -1, by: 'some-other-plugin' })
-    const plan = planManifest({ [SIDEBAR_WORKSPACES]: { mode: 'native' } }, envOf(slots))
+    const plan = planManifest(w1(), envOf(slots))
     assert.equal(plan.rejected[0]?.reason, 'priority_conflict')
     assert.match(String(plan.rejected[0]?.detail), /a human must decide/)
-    assert.deepEqual(plan.registrations, [])
+    assert.deepEqual(plan.registrations.map(registration => registration.slot), [SIDEBAR_WORKSPACES_DIRECTORY_FLOW])
   })
 
   test('a chain slot cannot be taken over by the generic proxy', () => {
@@ -348,12 +475,12 @@ describe('failing loud (§1.5)', () => {
 
   test('an install that throws is reported and leaves no ghost cell', () => {
     const slots = officialSidebar()
-    const env = envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT })
+    const env = envOf(slots, W1_PINS)
     const controller = createManifestController({
       env,
       install: () => { throw new Error('slot "sidebar.workspaces" already has an entry at priority -1') },
     })
-    const result = controller.configure({ [SIDEBAR_WORKSPACES]: { mode: 'native' } })
+    const result = controller.configure(w1())
     assert.deepEqual(result.applied, [])
     assert.equal(result.rejected[0]?.reason, 'priority_conflict')
     assert.deepEqual(controller.active, [])
@@ -361,36 +488,40 @@ describe('failing loud (§1.5)', () => {
 })
 
 describe('hot switching (§5)', () => {
-  const manifest: Manifest = { [SIDEBAR_WORKSPACES]: { mode: 'retired' } }
+  const manifest: Manifest = w1('retired')
 
   test('a patch replaces one row and re-applies without touching the rest', () => {
     const slots = officialSidebar()
     slots.declare('details', SINGLE)
-    const runtime = runtimeOf(envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }))
+    const runtime = runtimeOf(envOf(slots, W1_PINS))
     const controller = createManifestController(runtime)
     controller.configure({ ...manifest, details: { mode: 'native' } })
-    assert.deepEqual([...controller.active].sort(), ['details', SIDEBAR_WORKSPACES])
+    assert.deepEqual([...controller.active].sort(), [
+      'details', SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_DIRECTORY_FLOW,
+    ])
 
-    const result = controller.reconfigure({ [SIDEBAR_WORKSPACES]: { mode: 'web' } })
-    assert.deepEqual(result.applied, ['details'])
-    assert.deepEqual(controller.active, ['details'])
-    assert.deepEqual(runtime.installed.map(registration => registration.cell), ['details'])
+    // Rolling the section back to web while keeping the hole native is legal —
+    // that is the bottom-up ordering of rule 7 run in reverse.
+    const result = controller.reconfigure(w1('web'))
+    assert.deepEqual([...result.applied].sort(), ['details', SIDEBAR_WORKSPACES_DIRECTORY_FLOW])
+    assert.deepEqual([...controller.active].sort(), ['details', SIDEBAR_WORKSPACES_DIRECTORY_FLOW])
+    assert.equal(runtime.installed.some(registration => registration.slot === SIDEBAR_WORKSPACES), false)
   })
 
   test('flipping back to native re-registers the same cell', () => {
     const slots = officialSidebar()
-    const runtime = runtimeOf(envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }))
+    const runtime = runtimeOf(envOf(slots, W1_PINS))
     const controller = createManifestController(runtime)
     controller.configure(manifest)
-    controller.reconfigure({ [SIDEBAR_WORKSPACES]: { mode: 'web' } })
-    const back = controller.reconfigure({ [SIDEBAR_WORKSPACES]: { mode: 'native' } })
-    assert.deepEqual(back.applied, [SIDEBAR_WORKSPACES])
-    assert.equal(runtime.installed.length, 1)
+    controller.reconfigure(w1('web', 'web'))
+    const back = controller.reconfigure(w1('native'))
+    assert.deepEqual(back.applied, [SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_DIRECTORY_FLOW])
+    assert.equal(runtime.installed.length, 2)
   })
 
   test('a cell dropped from a full manifest falls back to rule 1', () => {
     const slots = officialSidebar()
-    const runtime = runtimeOf(envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }))
+    const runtime = runtimeOf(envOf(slots, W1_PINS))
     const controller = createManifestController(runtime)
     controller.configure(manifest)
     controller.configure({})
@@ -400,7 +531,7 @@ describe('hot switching (§5)', () => {
 
   test('disposeAll releases every cell, which is the pure-Web fallback', () => {
     const slots = officialSidebar()
-    const runtime = runtimeOf(envOf(slots, { [SIDEBAR_WORKSPACES]: SIDEBAR_WORKSPACES_CONTRACT }))
+    const runtime = runtimeOf(envOf(slots, W1_PINS))
     const controller = createManifestController(runtime)
     controller.configure(manifest)
     controller.disposeAll()

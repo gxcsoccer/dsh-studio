@@ -62,8 +62,14 @@ public final class NativeSlotHost {
     /// 启动期自检：manifest 说要原生，但宿主没有实现 → **大声失败**。
     ///
     /// 不等第一次 `slot/mount` 才发现 —— 那时候用户已经在看一块空白了。
+    ///
+    /// **暗槽不在自检范围内**（known-gaps.md G-5）：规则 7 是 bottom-up 的，
+    /// 接管一个父槽就必须把它声明的子槽也写进 manifest，而父槽赢下 cell 之后
+    /// 官方那棵子树不再挂载，那些子槽永不被渲染。要求它们有原生实现，就是把
+    /// 「一行纯记账的声明」变成「app 启动即失败」。判据用
+    /// `SurfaceManifest.slotsRequiringNativeView`，与漂移检测同一口径。
     public func verifyImplementations(for manifest: SurfaceManifest) throws {
-        for (slot, entry) in manifest.slots.sorted(by: { $0.key < $1.key }) where entry.mode.mountsNativeView {
+        for slot in manifest.slotsRequiringNativeView {
             guard factories[slot] != nil else {
                 let error = SurfaceError.noNativeImplementation(slot: slot)
                 telemetry.assemblyRejected(error)

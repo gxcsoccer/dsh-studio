@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DSH Studio — macOS app bundle 的 Info.plist。
+
+  这个文件是「原生宿主」这条产品支柱的准入证：菜单栏、Dock、系统通知、
+  钥匙串、原生文件对话框全部要求进程有 **bundle identifier**。一个裸的
+  SwiftPM 可执行文件拿不到这些能力，所以 W1 的产物必须是 .app。
+
+  由 scripts/package-app.sh 组装进 `DSH Studio.app/Contents/Info.plist`；
+  版本号在打包时由脚本覆盖。
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>DSH Studio</string>
+	<key>CFBundleName</key>
+	<string>DSH Studio</string>
+	<key>CFBundleExecutable</key>
+	<string>dsh-studio</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.gxcsoccer.dsh-studio</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<!-- Package.swift 的 platforms 是 .macOS(.v14)，两边必须一致。 -->
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSSupportsAutomaticTermination</key>
+	<false/>
+	<key>NSSupportsSuddenTermination</key>
+	<false/>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT License. Agent runtime remains official deepseek-harness.</string>
+	<!--
+	  ATS 例外：数据通道是 `127.0.0.1` 上的明文 HTTP + SSE
+	  （bridge-contract.md §2 —— 只绑 loopback，永不 0.0.0.0），官方 UI 壳
+	  也在 loopback 上。ATS 默认会把这两条都掐掉，所以必须显式开例外。
+
+	  例外只开给 loopback：`NSAllowsArbitraryLoads` 一律不加 —— 那等于把
+	  整个 WebView 的传输安全关掉，而我们要访问的只有本机。
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>127.0.0.1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<false/>
+			</dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>

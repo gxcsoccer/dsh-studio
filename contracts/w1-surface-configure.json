@@ -1,0 +1,14 @@
+{
+  "manifest": {
+    "sidebar.workspaces": {
+      "mode": "native",
+      "placement": "evacuated",
+      "priority": -1
+    },
+    "sidebar.workspaces.directoryFlow": {
+      "mode": "retired",
+      "placement": "evacuated",
+      "priority": -1
+    }
+  }
+}

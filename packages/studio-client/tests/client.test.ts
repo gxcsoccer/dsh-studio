@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import type { LiveSlotNode } from '@deepseek-ai/dsh-client-ui-slots'
 import { PROTOCOL_VERSION, type WebkitScope, type ReceiverScope } from '../src/client/bridge.ts'
-import { REGISTRANT, apply, attachStudio, surveySlots, type ProbeResult } from '../src/client/index.ts'
+import { REGISTRANT, apply, attachStudio, bootstrap, surveySlots, type ProbeResult } from '../src/client/index.ts'
 import { SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_DIRECTORY_FLOW } from '../src/client/slots/index.ts'
 import { fakeContext, fakeSlots, recordingTransport, type FakeContext, type FakeSlots, type RecordingTransport, type SentEnvelope } from './helpers.ts'
 
@@ -76,6 +76,19 @@ function officialWorld(): FakeSlots {
   return slots
 }
 
+/**
+ * The W1 manifest. Rule 7 makes takeover bottom-up: the section may only go
+ * native once the directory-flow hole it declares is Studio's too, so the wire
+ * manifest has two rows and a successful configure applies two cells.
+ */
+const W1_MANIFEST = {
+  [SIDEBAR_WORKSPACES]: { mode: 'native' },
+  [SIDEBAR_WORKSPACES_DIRECTORY_FLOW]: { mode: 'retired' },
+}
+
+/** The two cells {@link W1_MANIFEST} takes over, in plan order. */
+const W1_CELLS = [SIDEBAR_WORKSPACES, SIDEBAR_WORKSPACES_DIRECTORY_FLOW]
+
 describe('the measured slot table', () => {
   test('a snapshot tree is flattened depth-first and sorted by name', () => {
     const tree: LiveSlotNode[] = [{
@@ -115,10 +128,10 @@ describe('the measured slot table', () => {
 describe('surface/configure', () => {
   test('a native row registers below the official entry and wins the cell', async () => {
     const instance = rig()
-    const id = instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
+    const id = instance.send('surface/configure', { manifest: W1_MANIFEST })
     await flush()
     assert.equal(instance.answer(id)?.ok, true)
-    assert.deepEqual(instance.answer(id)?.p?.applied, [SIDEBAR_WORKSPACES])
+    assert.deepEqual(instance.answer(id)?.p?.applied, W1_CELLS)
     assert.deepEqual(instance.answer(id)?.p?.rejected, [])
 
     const ledgerRows = instance.slots.cell(SIDEBAR_WORKSPACES)
@@ -134,33 +147,39 @@ describe('surface/configure', () => {
 
   test('registration is one effect per cell, labelled by the cell', () => {
     const instance = rig()
-    instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
-    assert.ok(instance.ctx.effects.includes(`studio: ${SIDEBAR_WORKSPACES}`))
+    instance.send('surface/configure', { manifest: W1_MANIFEST })
+    assert.deepEqual(
+      instance.ctx.effects.filter(label => label.startsWith('studio: sidebar')),
+      W1_CELLS.map(cell => `studio: ${cell}`),
+    )
   })
 
   test('a configure that arrives before the declaring plugin loaded still applies later', async () => {
     const slots = fakeSlots()
     const instance = rig(slots)
-    const id = instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
+    const id = instance.send('surface/configure', { manifest: W1_MANIFEST })
     await flush()
     const result = instance.answer(id)?.p as { applied: string[]; notes: string[] }
-    assert.deepEqual(result.applied, [SIDEBAR_WORKSPACES])
+    assert.deepEqual(result.applied, W1_CELLS)
     assert.match(result.notes.join('\n'), /registration is deferred/)
     assert.equal(slots.all.length, 0)
 
-    // ui-sidebar loads and declares the hole: `ctx.slots.inject` fires.
+    // ui-sidebar loads and declares the hole: `ctx.slots.inject` fires. Our own
+    // section entry declares the child hole (rule 6), which releases the second
+    // deferred registration — the bottom-up manifest lands in one go.
     slots.declare(SIDEBAR_WORKSPACES, { kind: 'single', scope: 'root' })
-    assert.deepEqual(slots.all.map(entry => [entry.slot, entry.registrant]), [[SIDEBAR_WORKSPACES, REGISTRANT]])
+    assert.deepEqual(slots.all.map(entry => [entry.slot, entry.registrant]), [
+      [SIDEBAR_WORKSPACES, REGISTRANT],
+      [SIDEBAR_WORKSPACES_DIRECTORY_FLOW, REGISTRANT],
+    ])
   })
 
   test('an unknown slot is rejected without touching anything else', async () => {
     const instance = rig()
-    const id = instance.send('surface/configure', {
-      manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' }, 'sidebar.ghost': { mode: 'native' } },
-    })
+    const id = instance.send('surface/configure', { manifest: { ...W1_MANIFEST, 'sidebar.ghost': { mode: 'native' } } })
     await flush()
     const result = instance.answer(id)?.p as { applied: string[]; rejected: Array<{ cell: string; reason: string }> }
-    assert.deepEqual(result.applied, [SIDEBAR_WORKSPACES])
+    assert.deepEqual(result.applied, W1_CELLS)
     assert.deepEqual(result.rejected.map(rejection => [rejection.cell, rejection.reason]), [['sidebar.ghost', 'slot_not_declared']])
   })
 
@@ -176,9 +195,11 @@ describe('surface/configure', () => {
 describe('surface/reconfigure', () => {
   test('switching a cell back to web frees it at runtime, with no reload', async () => {
     const instance = rig()
-    instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
+    instance.send('surface/configure', { manifest: W1_MANIFEST })
     await flush()
-    const id = instance.send('surface/reconfigure', { patch: { [SIDEBAR_WORKSPACES]: { mode: 'web' } } })
+    const id = instance.send('surface/reconfigure', {
+      patch: { [SIDEBAR_WORKSPACES]: { mode: 'web' }, [SIDEBAR_WORKSPACES_DIRECTORY_FLOW]: { mode: 'web' } },
+    })
     await flush()
     assert.equal(instance.answer(id)?.ok, true)
     assert.deepEqual(instance.slots.cell(SIDEBAR_WORKSPACES).map(entry => entry.registrant), ['ui-workspace'])
@@ -188,13 +209,15 @@ describe('surface/reconfigure', () => {
 
   test('switching straight back re-takes the same cell at the same priority', async () => {
     const instance = rig()
-    instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
+    instance.send('surface/configure', { manifest: W1_MANIFEST })
     await flush()
     instance.send('surface/reconfigure', { patch: { [SIDEBAR_WORKSPACES]: { mode: 'web' } } })
     await flush()
     const id = instance.send('surface/reconfigure', { patch: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
     await flush()
-    assert.deepEqual((instance.answer(id)?.p as { applied: string[] }).applied, [SIDEBAR_WORKSPACES])
+    // The hole is still ours from the retained manifest, so re-taking the
+    // section re-applies both rows (rule 7 is checked again on every apply).
+    assert.deepEqual((instance.answer(id)?.p as { applied: string[] }).applied, W1_CELLS)
     assert.deepEqual(instance.slots.cell(SIDEBAR_WORKSPACES).map(entry => entry.options.priority), [-1, 0])
   })
 })
@@ -233,7 +256,7 @@ describe('slot/invoke over the wire', () => {
 describe('slot/probe', () => {
   test('it answers with the live occupancy, our cells, and our instances', async () => {
     const instance = rig()
-    instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
+    instance.send('surface/configure', { manifest: W1_MANIFEST })
     instance.studio.ledger.mount('01PROBE', { slot: SIDEBAR_WORKSPACES, invocable: true, actions: {} })
     const id = instance.send('slot/probe', { slot: SIDEBAR_WORKSPACES })
     await flush()
@@ -272,7 +295,7 @@ describe('the closed method table (§1.3)', () => {
 describe('slot/error telemetry (§1.3)', () => {
   test('a render failure is reported with the instance and the abdication flag', () => {
     const instance = rig()
-    instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
+    instance.send('surface/configure', { manifest: W1_MANIFEST })
     instance.studio.ledger.mount('01ERR', { slot: SIDEBAR_WORKSPACES, invocable: true, actions: {} })
     const entry = instance.slots.cell(SIDEBAR_WORKSPACES)[0]
     assert.ok(entry !== undefined)
@@ -301,9 +324,9 @@ describe('slot/error telemetry (§1.3)', () => {
 describe('protocol mismatch (§4, ADR-0004)', () => {
   test('an unknown v releases every cell and silences the channel', async () => {
     const instance = rig()
-    instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
+    instance.send('surface/configure', { manifest: W1_MANIFEST })
     await flush()
-    assert.equal(instance.studio.controller.active.length, 1)
+    assert.equal(instance.studio.controller.active.length, 2)
 
     instance.studio.bridge.receive(JSON.stringify({ v: 99, t: 'evt', m: 'surface/hello', p: {} }))
     assert.equal(instance.studio.bridge.degraded, true)
@@ -327,7 +350,7 @@ describe('protocol mismatch (§4, ADR-0004)', () => {
 describe('reversibility', () => {
   test('unloading the plugin removes the global, the handlers and the registrations', async () => {
     const instance = rig()
-    instance.send('surface/configure', { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } })
+    instance.send('surface/configure', { manifest: W1_MANIFEST })
     await flush()
     assert.equal(instance.scope.__DSH_STUDIO__?.protocol, PROTOCOL_VERSION)
 
@@ -342,18 +365,20 @@ describe('reversibility', () => {
 describe('the plugin entry point', () => {
   test('a page without the WKWebView handler stays inert', () => {
     const ctx = fakeContext(officialWorld())
-    apply(ctx)
+    const scope: WebkitScope & ReceiverScope = {}
+    assert.equal(bootstrap(ctx, scope), undefined)
     assert.deepEqual(ctx.effects, [])
-    assert.equal((globalThis as unknown as ReceiverScope).__DSH_STUDIO__, undefined)
+    assert.equal(scope.__DSH_STUDIO__, undefined)
   })
 
   test('inside the WKWebView it installs the receiver and announces itself', async () => {
     const posted: string[] = []
-    const scope = globalThis as unknown as WebkitScope & ReceiverScope
-    scope.webkit = { messageHandlers: { studio: { postMessage: (body: string) => { posted.push(body) } } } }
-    try {
+    const scope: WebkitScope & ReceiverScope = {
+      webkit: { messageHandlers: { studio: { postMessage: (body: string) => { posted.push(body) } } } },
+    }
+    {
       const ctx = fakeContext(officialWorld())
-      apply(ctx, { diagnostics: false })
+      bootstrap(ctx, scope, { diagnostics: false })
       assert.equal(scope.__DSH_STUDIO__?.protocol, PROTOCOL_VERSION)
       const ready = JSON.parse(posted[0] ?? '{}') as SentEnvelope
       assert.equal(ready.m, 'surface/ready')
@@ -361,17 +386,22 @@ describe('the plugin entry point', () => {
       // The receiver is the host's only entry point, and it works.
       scope.__DSH_STUDIO__?.receive(JSON.stringify({
         v: PROTOCOL_VERSION, t: 'req', id: 'live-1', m: 'surface/configure',
-        p: { manifest: { [SIDEBAR_WORKSPACES]: { mode: 'native' } } },
+        p: { manifest: W1_MANIFEST },
       }))
       await flush()
       const receipt = posted.map(json => JSON.parse(json) as SentEnvelope).find(envelope => envelope.id === 'live-1')
-      assert.deepEqual(receipt?.p?.applied, [SIDEBAR_WORKSPACES])
+      assert.deepEqual(receipt?.p?.applied, W1_CELLS)
 
       ctx.unload()
       await flush()
       assert.equal(scope.__DSH_STUDIO__, undefined)
-    } finally {
-      delete scope.webkit
     }
+  })
+
+  test('apply() is the same body over a real context, so only its wiring is untested here', () => {
+    // `apply` narrows a real `ClientContext` with `studioContext()` and passes
+    // `globalThis`; both are one expression each, and everything below them is
+    // `bootstrap`, exercised above.
+    assert.equal(typeof apply, 'function')
   })
 })

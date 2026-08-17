@@ -16,6 +16,11 @@ public enum SurfaceError: Error, Hashable, Sendable, CustomStringConvertible {
     /// 收到未在 manifest 里声明为 native/mirrored 的插槽的挂载请求。
     /// 安全边界（bridge-contract.md §5）：WebView 不能自己决定接管哪一格。
     case slotNotConfigured(slot: String)
+    /// client 半在 `surface/configure` 的回执里拒了这一行（部分拒绝：其余行仍然
+    /// 生效，所以不降级）。**必须带上 client 给的 `detail`** —— 那七个封闭码
+    /// 分辨率太低，`bad_payload` 既可能是键名拼错，也可能是规则 7 没满足
+    /// （known-gaps.md G-7）。
+    case configureRejected(slot: String, reason: String, detail: String?)
     case slotNotMounted(instanceID: String)
     /// `slot/invoke` 只能触达 manifest 里声明为 native 的插槽的注入面。
     case actionNotDeclared(slot: String, action: String)
@@ -31,6 +36,9 @@ public enum SurfaceError: Error, Hashable, Sendable, CustomStringConvertible {
             "`\(slot)` (instance \(instanceID)) is evacuated; geometry reports are a protocol violation"
         case .slotNotConfigured(let slot):
             "`\(slot)` is not declared native/mirrored in the manifest — refusing to mount"
+        case .configureRejected(let slot, let reason, let detail):
+            "client refused the manifest row for `\(slot)`: \(reason)"
+                + (detail.map { " — \($0)" } ?? "")
         case .slotNotMounted(let instanceID):
             "no live slot instance `\(instanceID)`"
         case .actionNotDeclared(let slot, let action):
@@ -46,6 +54,7 @@ public enum SurfaceError: Error, Hashable, Sendable, CustomStringConvertible {
         case .noNativeImplementation: .internalError
         case .overlayInsideScrollContainer, .geometryForEvacuatedPlacement: .badPayload
         case .slotNotConfigured: .slotNotDeclared
+        case .configureRejected: .badPayload
         case .slotNotMounted: .slotNotMounted
         case .actionNotDeclared: .unknownMethod
         case .invokeOnNonNativeSlot: .slotNotDeclared

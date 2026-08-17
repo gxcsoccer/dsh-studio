@@ -106,13 +106,31 @@ export function assertLoopback(address: string): void {
   }
 }
 
-/** Contents of `$DSH_HOME/studio/bridge.json`. */
+/**
+ * Contents of `$DSH_HOME/studio/bridge.json` (§2.1).
+ *
+ * The field table is part of the contract, not an implementation detail: the
+ * native half decodes exactly these keys (`apps/macos` `BridgeDescriptor`), and
+ * it treats a missing `host` as the loopback literal and a missing `webUrl` as
+ * "no official shell address published yet". Both are therefore written
+ * explicitly whenever they are known — a native half that has to guess where
+ * the Web shell lives shows the user a "runtime offline" screen instead.
+ */
 export interface Handshake {
+  /** Bind host. Always the loopback literal; it is asserted, never configured (§5). */
+  host: string
   port: number
+  /** `http://<host>:<port>` — the same value, pre-joined for HTTP clients. */
   origin: string
   token: string
   protocol: number
   pid: number
+  /**
+   * URL of the official Web shell the native half loads into its WebView.
+   * Omitted when the deployment did not configure one, in which case the native
+   * half falls back to its own `DSH_STUDIO_SHELL_URL` escape hatch.
+   */
+  webUrl?: string
 }
 
 /**

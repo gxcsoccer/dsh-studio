@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Upstream's own client packages emit here and bundle out of it
+    // (`packages/client/*/tsconfig.json`): lib/types carries both the
+    // declarations package.json points `types` at and the JavaScript tsdown
+    // bundles into lib/index.js and lib/client.js.
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "noEmit": false,
+    "declaration": true,
+    // The sources import `./x.ts` on purpose (the checker resolves the real
+    // file, not a build artifact). This rewrites those specifiers to `./x.js`
+    // on emit, which is what makes the same tree both checkable and buildable.
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src"]
+}

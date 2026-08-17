@@ -115,6 +115,19 @@ export interface BridgeConfig {
    * `ctx.dshHomePath`; Studio never re-derives `$DSH_HOME` itself.
    */
   tokenFile: string
+  /**
+   * URL of the official Web shell, published to the native half as the
+   * handshake's `webUrl` (bridge-contract.md §2.1).
+   *
+   * It is configuration rather than something this plugin derives, and that is
+   * a deliberate boundary: the address the browser must use is decided by the
+   * web bundle's own rows (`webserver` host/port, a reverse proxy in front of
+   * them, an SSH tunnel), and none of that is knowable from inside a plugin
+   * that only injects `apiProxy`. Empty (the default) publishes no `webUrl` at
+   * all — the honest answer, which the native half reports as "no shell
+   * address yet" instead of loading a wrong page.
+   */
+  shellUrl: string
 }
 
 /** Plugin configuration. */
@@ -137,6 +150,7 @@ export const Config: z<Config> = z.object({
     port: z.natural().default(DEFAULT_BRIDGE_PORT),
     retention: z.natural().default(DEFAULT_RETENTION),
     tokenFile: z.string().default(''),
+    shellUrl: z.string().default(''),
   }),
   surface: z.dict(SlotEntrySchema).default({}),
   compareHotkey: z.string().default('opt+shift+d'),

@@ -15,23 +15,54 @@ public struct StudioRootView: View {
     }
 
     public var body: some View {
-        HSplitView {
-            NativeSlotOutlet(
-                slot: W1.workspacesSlot,
-                coordinator: environment.coordinator,
-                stage: environment.host.stage
-            ) {
-                placeholder
-            }
-            .frame(minWidth: 0, idealWidth: 260)
+        VStack(spacing: 0) {
+            StudioStatusBar(
+                linkBanner: environment.client.link.bannerText,
+                controlNotice: environment.coordinator.controlLinkHealth.noticeText
+            )
+            HSplitView {
+                nativeRail
+                    .frame(minWidth: 0, idealWidth: 260)
 
-            WebContainer(bridge: environment.webBridge, url: environment.shellURL)
-                .frame(minWidth: 480)
+                webPane
+                    .frame(minWidth: 480)
+            }
         }
         .environment(environment.client)
         .toolbar {
             ToolbarItem(placement: .status) {
                 phaseBadge
+            }
+        }
+    }
+
+    /// 原生插槽出口。
+    ///
+    /// 控制通道处于 `suspect`（丢了一拍心跳、还没判死）时**灰化并禁用**：
+    /// 这一段里 `slot/invoke` 很可能已经无效，让用户点得到却点不动比什么都糟
+    /// （known-gaps.md G-3 的收尾要求）。
+    private var nativeRail: some View {
+        let suspect = environment.coordinator.controlLinkHealth.isSuspect
+        return NativeSlotOutlet(
+            slot: W1.workspacesSlot,
+            coordinator: environment.coordinator,
+            stage: environment.host.stage
+        ) {
+            placeholder
+        }
+        .opacity(suspect ? 0.45 : 1)
+        .disabled(suspect)
+        .accessibilityHint(suspect ? "控制通道无响应，原生侧栏暂时不可操作" : "")
+    }
+
+    /// 右半屏：有壳地址就渲染官方 UI，没有就显示失联态（不是白屏）。
+    @ViewBuilder
+    private var webPane: some View {
+        if let url = environment.shellURL {
+            WebContainer(bridge: environment.webBridge, url: url)
+        } else {
+            RuntimeOfflineView(detail: environment.shellFailure) {
+                environment.retryShellDiscovery()
             }
         }
     }
@@ -85,8 +116,10 @@ public struct DSHStudioApp: App {
     public var body: some Scene {
         WindowGroup("DSH Studio") {
             StudioRootView(environment: environment)
+                .frame(minWidth: 860, minHeight: 560)
                 .task { environment.launch() }
         }
+        .defaultSize(width: 1180, height: 760)
         .commands {
             CommandMenu("Studio") {
                 // 对照热键 ⌥⇧D：把当前插槽在 native / web 间热切
@@ -95,6 +128,11 @@ public struct DSHStudioApp: App {
                     environment.toggleCompare()
                 }
                 .keyboardShortcut("d", modifiers: [.option, .shift])
+
+                Button("重新查找 runtime") {
+                    environment.retryShellDiscovery()
+                }
+                .keyboardShortcut("r", modifiers: [.command])
 
                 Button("重新同步会话快照") {
                     Task { @MainActor in try? await environment.client.refreshSnapshot() }

@@ -38,7 +38,7 @@ const HOOK_PROP = /^use[A-Z]/
  * @param props - the composed props the framework passed the entry.
  * @returns the callable injection face, keyed by action name.
  */
-export function pickActions(props: Record<string, unknown>): Record<string, SlotAction> {
+export function pickActions(props: object): Record<string, SlotAction> {
   const out: Record<string, SlotAction> = {}
   for (const [key, value] of Object.entries(props)) {
     if (typeof value !== 'function') continue

@@ -69,12 +69,15 @@ public final class ControlChannel: SlotInvocationSink {
     public var onSlotEvent: (@MainActor (SurfaceEvent) throws -> Void)?
     /// 握手（`surface/ready`）。
     public var onReady: (@MainActor (SurfaceReady) -> Void)?
+    /// 心跳回答（`surface/pong`）。载荷原样给出 —— 心跳判定不在通道里做，
+    /// 由 `SurfaceHeartbeat` 决定（known-gaps.md G-3）。
+    public var onPong: (@MainActor (JSONValue) -> Void)?
     /// 协议版本不一致 —— 不猜、不适配，交给协调器降级（bridge-contract.md §4）。
     public var onProtocolMismatch: (@MainActor (Int) -> Void)?
 
     private weak var evaluator: (any SurfaceScriptEvaluator)?
     private let telemetry: any SurfaceTelemetry
-    private let sleeper: @Sendable (Duration) async throws -> Void
+    private let sleeper: SleepFunction
 
     private var pending: [MessageID: CheckedContinuation<JSONValue, any Error>] = [:]
     private var timeouts: [MessageID: Task<Void, Never>] = [:]
@@ -86,12 +89,11 @@ public final class ControlChannel: SlotInvocationSink {
 
     public init(
         telemetry: any SurfaceTelemetry = LoggingSurfaceTelemetry(),
-        sleeper: @escaping @Sendable (Duration) async throws -> Void = { duration in
-            try await Task.sleep(for: duration)
-        }
+        // 默认值必须是命名常量，不能是默认参数里的闭包字面量（DSHKit/InjectableClock.swift）。
+        sleeper: SleepFunction? = nil
     ) {
         self.telemetry = telemetry
-        self.sleeper = sleeper
+        self.sleeper = sleeper ?? SystemSleep.duration
     }
 
     public func attach(evaluator: any SurfaceScriptEvaluator) {
@@ -229,8 +231,25 @@ public final class ControlChannel: SlotInvocationSink {
         case .event(let method, let payload):
             handleEvent(method: method, payload: payload)
 
-        case .request(let identifier, let method, _):
-            // 契约里没有 Web→Native 的 req。回一个封闭错误码，不静默。
+        case .request(let identifier, let method, let payload):
+            // 心跳是唯一允许反向发起的一条：如果 client 半选择由它 ping 宿主，
+            // 我们照样回执（known-gaps.md G-3 只规定了「谁没回谁失联」，没规定
+            // 方向）。同时这也是一条活体证据 —— 对端的事件循环显然还在跑。
+            if method == ControlMethod.surfacePing {
+                onPong?(payload)
+                Task { @MainActor [weak self] in
+                    guard let self, let evaluator = self.evaluator else { return }
+                    let pong = BridgeEnvelope.success(
+                        id: identifier,
+                        payload: .object(["seq": payload["seq"] ?? .null])
+                    )
+                    if let script = try? SurfaceScript.receiveCall(pong) {
+                        try? await evaluator.evaluate(script)
+                    }
+                }
+                return
+            }
+            // 除心跳外，契约里没有 Web→Native 的 req。回一个封闭错误码，不静默。
             reject(BridgeFault(code: .unknownMethod, message: "web side sent req `\(method)`"), raw: "")
             Task { @MainActor [weak self] in
                 guard let self, let evaluator = self.evaluator else { return }
@@ -246,6 +265,11 @@ public final class ControlChannel: SlotInvocationSink {
     }
 
     private func handleEvent(method: String, payload: JSONValue) {
+        if method == ControlMethod.surfacePong {
+            // 兼容把 pong 写成单向事件的 client 半实现（G-3 主格式是回执）。
+            onPong?(payload)
+            return
+        }
         if method == ControlMethod.surfaceReady {
             do {
                 let ready = try SurfaceEventDecoder.decodeReady(payload)

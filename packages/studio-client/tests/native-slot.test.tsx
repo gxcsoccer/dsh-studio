@@ -7,13 +7,12 @@
 
 import assert from 'node:assert/strict'
 import { afterEach, describe, test } from 'node:test'
-import { createElement } from 'react'
 import { fakeResizeObservers, mountHarness, pinGeometry, type Harness } from './dom.ts'
 import { createBridge, type Bridge } from '../src/client/bridge.ts'
 import { createInstanceLedger, pickActions, type InstanceLedger } from '../src/client/invoke.ts'
 import {
   ORCHESTRATION_KEYS, hasScrollableAncestor, nativeSlot, serializeOrchestration, shallowDiff,
-  type NativeSlotOptions, type ProxyProps,
+  type NativeSlotOptions,
 } from '../src/client/native-slot.tsx'
 import { recordingTransport, type RecordingTransport, type SentEnvelope } from './helpers.ts'
 
@@ -25,8 +24,12 @@ interface Rig {
   transport: RecordingTransport
   ledger: InstanceLedger
   harness: Harness
-  /** Render the proxy with the given props. */
-  render(props: ProxyProps): void
+  /**
+   * Render the proxy with the given props. Typed as a record because the whole
+   * point of the proxy is that it accepts any owner share; the JSX spread is
+   * what makes that legal against its narrow `ProxyProps` parameter.
+   */
+  render(props: Record<string, unknown>): void
   /** Payloads of one event method, in order. */
   events(method: string): Array<Record<string, unknown>>
   /** The instanceId reported by `slot/mount`. */
@@ -62,7 +65,7 @@ function rig(
     transport,
     ledger,
     harness,
-    render(props) { harness.render(createElement(Component, props)) },
+    render(props) { harness.render(<Component {...props} />) },
     events(method) {
       return transport.ofMethod(method).map(envelope => envelope.p ?? {})
     },

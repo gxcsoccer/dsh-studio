@@ -20,34 +20,39 @@
  * every Studio artifact is additive.
  */
 
-import type { ClientContext, ErasedRegisterOptions } from '@deepseek-ai/dsh-client-runtime/client'
-import type { LiveSlotNode, StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import {
   createBridge, installReceiver, webkitTransport, PROTOCOL_VERSION,
   type Bridge, type BridgeTransport, type ReceiverScope,
   type SurveyedSlot, type WebkitScope, type WireScope,
 } from './bridge.ts'
 import { createInstanceLedger, installInvokeHandler, type InstanceLedger } from './invoke.ts'
+import { installHeartbeatResponder, type HeartbeatResponder } from './heartbeat.ts'
 import {
-  createManifestController, type ManifestController, type ManifestRuntime, type SlotEnvironment,
+  createManifestController, REGISTRANT,
+  type ManifestController, type ManifestRuntime, type SlotEnvironment,
 } from './manifest.ts'
 import { nativeSlot } from './native-slot.tsx'
 import { expectString } from './payload.ts'
 import { pinnedContract } from './slots/index.ts'
+import {
+  studioContext,
+  type DynamicRegisterOptions, type LiveSlotNode, type StoredEntry, type StudioContext,
+} from './upstream.ts'
 
 export type { Bridge, BridgeErrorCode, SurveyedSlot, WireError, WireRect } from './bridge.ts'
+export type { HeartbeatResponder, PingPayload, PongPayload } from './heartbeat.ts'
+export { HEARTBEAT_INTERVAL_MS, HEARTBEAT_MISS_THRESHOLD } from './heartbeat.ts'
 export type {
   CellRegistration, ConfigureResult, Manifest, ManifestPlan, Rejection, SlotEntry, SlotMode,
 } from './manifest.ts'
 export type { Placement } from './native-slot.tsx'
+export type { DynamicSlots, StudioContext } from './upstream.ts'
 export { PROTOCOL_VERSION } from './bridge.ts'
-
-/**
- * Registrant label attached to every Studio registration. It is what makes a
- * Studio entry identifiable in `ctx.slots.snapshot()` — for the host, for the
- * `slot/probe` answer, and for a human reading the official devtools.
- */
-export const REGISTRANT = 'dsh-studio'
+// The label lives with the manifest rules because rule 7 reads it back off the
+// live ledger; it is re-exported here because it is also part of what the host
+// sees in `surface/ready` and `slot/probe`.
+export { REGISTRANT } from './manifest.ts'
 
 /** Required services. `slots` is the only seam Studio touches (ARCHITECTURE.md §3). */
 export const inject = ['slots']
@@ -66,6 +71,8 @@ export interface StudioClient {
   bridge: Bridge
   ledger: InstanceLedger
   controller: ManifestController
+  /** The `surface/ping` answering half (§1.6); the host owns the timer and the verdict. */
+  heartbeat: HeartbeatResponder
   /** Send `surface/ready` with the measured slot table (§1.1 handshake). */
   announce(): void
 }
@@ -140,7 +147,7 @@ export interface ProbeResult {
  * @param options - transport and receiver seams.
  * @returns the assembled client.
  */
-export function attachStudio(ctx: ClientContext, options: AttachOptions): StudioClient {
+export function attachStudio(ctx: StudioContext, options: AttachOptions): StudioClient {
   const diagnose = options.diagnostics === true
     ? (message: string): void => { console.info(`[studio] ${message}`) }
     : (): void => {}
@@ -177,7 +184,7 @@ export function attachStudio(ctx: ClientContext, options: AttachOptions): Studio
         invocable: registration.mode !== 'mirrored',
         ...(registration.key === undefined ? {} : { key: registration.key }),
       })
-      const registerOptions: ErasedRegisterOptions = {
+      const registerOptions: DynamicRegisterOptions = {
         name: registration.slot,
         priority: registration.priority,
         registrant: REGISTRANT,
@@ -204,6 +211,20 @@ export function attachStudio(ctx: ClientContext, options: AttachOptions): Studio
 
   ctx.effect(() => installReceiver(bridge, options.scope), 'studio: __DSH_STUDIO__ receiver')
   ctx.effect(() => installInvokeHandler(bridge, ledger), 'studio: slot/invoke')
+
+  // The host drives the heartbeat and this half only answers (§1.6). The
+  // handler is installed here, next to the receiver, because it must be live
+  // for the whole lifetime of the client half: an uninstalled handler answers
+  // `unknown_method`, which the host counts as a missed beat and — after two —
+  // as a dead client half, taking every native view down.
+  let heartbeat: HeartbeatResponder | undefined
+  ctx.effect(() => {
+    const responder = installHeartbeatResponder(bridge, seq => { diagnose(`answered surface/ping seq ${String(seq)}`) })
+    heartbeat = responder
+    return () => { responder.dispose() }
+  }, 'studio: surface/ping')
+  /* v8 ignore next -- ctx.effect runs its factory synchronously (cordis fiber.ts) */
+  if (heartbeat === undefined) throw new Error('studio: heartbeat responder was not installed')
 
   ctx.effect(() => bridge.handle('surface/configure', payload => controller.configure(payload.manifest)),
     'studio: surface/configure')
@@ -246,6 +267,7 @@ export function attachStudio(ctx: ClientContext, options: AttachOptions): Studio
     bridge,
     ledger,
     controller,
+    heartbeat,
     announce() {
       bridge.emit('surface/ready', {
         protocol: PROTOCOL_VERSION,
@@ -256,17 +278,28 @@ export function attachStudio(ctx: ClientContext, options: AttachOptions): Studio
 }
 
 /**
- * Plugin entry point.
- * @param ctx - client root context.
+ * The entry point's body, over the narrow context face and an explicit scope.
+ *
+ * Split out from {@link apply} so it is drivable without a WKWebView *and*
+ * without a full Cordis context: the scope is a parameter instead of
+ * `globalThis`, which is also what lets the inert case be tested without
+ * mutating the test runner's global object.
+ * @param ctx - narrowed client context.
+ * @param scope - where the WKWebView handler and `__DSH_STUDIO__` live.
  * @param config - plugin configuration.
+ * @returns the assembled client, or undefined when the page is not hosted by
+ * Studio (then nothing at all was installed).
  */
-export function apply(ctx: ClientContext, config: Config = {}): void {
-  const scope = globalThis as unknown as WebkitScope & ReceiverScope
+export function bootstrap(
+  ctx: StudioContext,
+  scope: WebkitScope & ReceiverScope,
+  config: Config = {},
+): StudioClient | undefined {
   const transport = webkitTransport(scope)
   if (transport === undefined) {
     // Not inside the Studio WKWebView: stay inert. The official UI is
     // untouched (ADR-0004), so a plain browser build keeps working.
-    return
+    return undefined
   }
   const studio = attachStudio(ctx, {
     transport,
@@ -276,4 +309,14 @@ export function apply(ctx: ClientContext, config: Config = {}): void {
   // The handshake is the last thing that happens: by the time the host may
   // answer with a manifest, every inbound handler is installed.
   studio.announce()
+  return studio
+}
+
+/**
+ * Plugin entry point.
+ * @param ctx - client root context.
+ * @param config - plugin configuration.
+ */
+export function apply(ctx: ClientContext, config: Config = {}): void {
+  bootstrap(studioContext(ctx), globalThis as unknown as WebkitScope & ReceiverScope, config)
 }

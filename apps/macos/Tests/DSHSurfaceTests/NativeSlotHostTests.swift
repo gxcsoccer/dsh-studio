@@ -17,6 +17,9 @@ final class RecordingTelemetry: SurfaceTelemetry, @unchecked Sendable {
     private var _drifts: [SlotContractDrift] = []
     private var _slotFailures: [SlotErrorReport] = []
     private var _domainViolations: [(slot: String, keys: [String])] = []
+    private var _heartbeatMisses: [Int] = []
+    private var _manifestOrigins: [String] = []
+    private var _manifestNativeSlots: [[String]] = []
 
     private func sync<T>(_ body: () -> T) -> T {
         lock.lock()
@@ -31,6 +34,10 @@ final class RecordingTelemetry: SurfaceTelemetry, @unchecked Sendable {
     var drifts: [SlotContractDrift] { sync { _drifts } }
     var slotFailures: [SlotErrorReport] { sync { _slotFailures } }
     var domainViolations: [(slot: String, keys: [String])] { sync { _domainViolations } }
+    var heartbeatMisses: [Int] { sync { _heartbeatMisses } }
+    /// G-4：这一轮宿主到底按哪份 manifest 接管的。
+    var manifestOrigins: [String] { sync { _manifestOrigins } }
+    var manifestNativeSlots: [[String]] { sync { _manifestNativeSlots } }
 
     func slotFailed(_ report: SlotErrorReport) { sync { _slotFailures.append(report) } }
     func assemblyRejected(_ error: SurfaceError) { sync { _rejections.append(error) } }
@@ -39,6 +46,13 @@ final class RecordingTelemetry: SurfaceTelemetry, @unchecked Sendable {
     func degraded(_ reason: DegradationReason) { sync { _degradations.append(reason) } }
     func orchestrationDropped(_ note: String) { sync { _drops.append(note) } }
     func domainDataRejected(slot: String, keys: [String]) { sync { _domainViolations.append((slot, keys)) } }
+    func heartbeatMissed(misses: Int, detail: String) { sync { _heartbeatMisses.append(misses) } }
+    func manifestAdopted(origin: String, slots: [String]) {
+        sync {
+            _manifestOrigins.append(origin)
+            _manifestNativeSlots.append(slots)
+        }
+    }
 }
 
 /// 假注入面：记录 `slot/invoke`，可注入失败。

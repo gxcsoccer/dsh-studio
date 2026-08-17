@@ -86,4 +86,33 @@ struct ArchitectureGuardTests {
         #expect(surfaceUsers == ["WebViewControlBridge.swift"])
         #expect(appUsers == ["WebContainer.swift"])
     }
+
+    /// G-6 的源码守卫。
+    ///
+    /// 时钟缝（`sleeper`）的默认值写成默认参数里的 async 闭包字面量，会让**只走
+    /// 默认参数的生产路径**在跨任务释放时 `abort()`，而注入假时钟的单测全绿 ——
+    /// 一个只在真机上炸、在 CI 上永远看不见的形态。所以把它钉成源码规则：
+    /// 默认值必须是 `SystemSleep.duration` 这类命名常量
+    /// （见 `DSHKit/InjectableClock.swift`）。
+    @Test("时钟缝不许写成默认参数里的 async 闭包字面量（known-gaps.md G-6）")
+    func clockSeamsUseNamedDefaults() throws {
+        // 形如：`sleeper: @escaping @Sendable (Duration) async throws -> Void = {`
+        let offender = try NSRegularExpression(pattern: #"async[^\n]*->[^\n=]*=\s*\{"#)
+        for target in ["DSHKit", "DSHClient", "DSHSurface", "DSHApp"] {
+            for file in try swiftFiles(in: target) {
+                let lines = file.text.split(separator: "\n", omittingEmptySubsequences: false)
+                for (index, line) in lines.enumerated() {
+                    let text = String(line)
+                    // 注释行不算（`InjectableClock.swift` 的说明里就抄了这个反例）。
+                    let trimmed = text.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.hasPrefix("//"), !trimmed.hasPrefix("///") else { continue }
+                    let range = NSRange(text.startIndex..<text.endIndex, in: text)
+                    #expect(
+                        offender.firstMatch(in: text, range: range) == nil,
+                        "\(target)/\(file.name):\(index + 1) 把 async 闭包写成了默认参数值 —— 改成 SystemSleep.duration 这类命名常量（G-6）"
+                    )
+                }
+            }
+        }
+    }
 }

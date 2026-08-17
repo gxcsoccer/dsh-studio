@@ -213,7 +213,8 @@ struct SurfaceCoordinatorTests {
         handshakeTimeout: Duration = .seconds(15),
         registerWorkspaces: Bool = true,
         channelSleeper: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        coordinatorSleeper: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        coordinatorSleeper: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        manifestSource: SurfaceCoordinator.ManifestSource? = nil
     ) -> (coordinator: SurfaceCoordinator, channel: ControlChannel, evaluator: FakeEvaluator, host: NativeSlotHost, telemetry: RecordingTelemetry) {
         let telemetry = RecordingTelemetry()
         let (channel, evaluator, _) = makeChannel(telemetry: telemetry, sleeper: channelSleeper)
@@ -224,7 +225,8 @@ struct SurfaceCoordinatorTests {
             manifest: manifest,
             telemetry: telemetry,
             handshakeTimeout: handshakeTimeout,
-            sleeper: coordinatorSleeper
+            sleeper: coordinatorSleeper,
+            manifestSource: manifestSource
         )
         return (coordinator, channel, evaluator, host, telemetry)
     }
@@ -439,5 +441,203 @@ struct SurfaceCoordinatorTests {
         ])))
         #expect(stack.host.stage.mounted.isEmpty)
         #expect(stack.telemetry.drops.contains { $0.contains("phase=") })
+    }
+}
+
+/// G-4：manifest 的唯一真相源是 runtime 的 `/studio/surface`。
+///
+/// 这一组用例的落点是「**下发的到底是哪张表**」—— 前一轮的症状是宿主拿自己
+/// 编译的那份去 configure，client 半按规则 7 整条拒绝，用户永远看不到原生视图。
+@Suite("SurfaceCoordinator：权威 manifest 来自 runtime（known-gaps.md G-4）")
+@MainActor
+struct RuntimeManifestAdoptionTests {
+    private func handshake(_ channel: ControlChannel) {
+        channel.receive(envelope: .event(method: ControlMethod.surfaceReady, payload: .object([
+            "protocol": .number(1),
+            "slots": .array([
+                .object(["name": .string(W1.workspacesSlot), "kind": .string("single"), "scope": .string("root")]),
+                .object(["name": .string(W1.workspacesDirectoryFlowSlot), "kind": .string("single"), "scope": .string("root")]),
+            ]),
+        ])))
+    }
+
+    private func acceptEverything(_ evaluator: FakeEvaluator) {
+        evaluator.autoReply = { envelope in
+            guard let id = envelope.id, envelope.method == ControlMethod.surfaceConfigure else { return nil }
+            let applied = (envelope.payload["manifest"]?.objectValue?.keys.sorted() ?? []).map(JSONValue.string)
+            return .success(id: id, payload: .object(["applied": .array(applied), "rejected": .array([])]))
+        }
+    }
+
+    @Test("拿到 runtime manifest → 采纳它，下发的就是 runtime 那张表")
+    func adoptsRuntimeManifest() async throws {
+        // runtime 那份把 W1 插槽记成 retired（= 迁移已完成），兜底那份是 native。
+        let authoritative = SurfaceManifest(slots: [
+            W1.workspacesSlot: SlotEntry(mode: .retired, placement: .evacuated, priority: -1),
+            W1.workspacesDirectoryFlowSlot: SlotEntry(mode: .retired, placement: .evacuated, priority: -1),
+        ])
+        let telemetry = RecordingTelemetry()
+        let (channel, evaluator, _) = makeChannel(telemetry: telemetry)
+        let (host, _, _) = makeHost(manifest: .w1Default, telemetry: telemetry)
+        let coordinator = SurfaceCoordinator(
+            channel: channel,
+            host: host,
+            manifest: .w1Default,
+            telemetry: telemetry,
+            manifestSource: { authoritative }
+        )
+        acceptEverything(evaluator)
+        try coordinator.start()
+        handshake(channel)
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(coordinator.manifestOrigin == .runtimeAuthority)
+        #expect(coordinator.manifest.entry(for: W1.workspacesSlot).mode == .retired)
+        #expect(coordinator.phase == .live(protocolVersion: 1))
+        // 下发的 payload 里是 runtime 那份（两行，父槽 retired）。
+        let request = try #require(evaluator.lastRequest)
+        #expect(request.payload["manifest"]?[W1.workspacesSlot]?["mode"]?.stringValue == "retired")
+        #expect(request.payload["manifest"]?[W1.workspacesDirectoryFlowSlot] != nil)
+        // 暗槽照样不需要原生实现，所以照样能 live（G-5）。
+        #expect(telemetry.manifestOrigins.contains { $0.contains("runtime authority") })
+    }
+
+    @Test("拿不到 runtime manifest → 用编译期兜底，照样能 live（不 crash、不空白）")
+    func fallsBackWhenRuntimeIsSilent() async throws {
+        let telemetry = RecordingTelemetry()
+        let (channel, evaluator, _) = makeChannel(telemetry: telemetry)
+        let (host, _, _) = makeHost(manifest: .w1Default, telemetry: telemetry)
+        let coordinator = SurfaceCoordinator(
+            channel: channel,
+            host: host,
+            manifest: .w1Default,
+            telemetry: telemetry,
+            manifestSource: { nil }
+        )
+        acceptEverything(evaluator)
+        try coordinator.start()
+        handshake(channel)
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(coordinator.manifestOrigin == .compiledFallback)
+        #expect(coordinator.phase == .live(protocolVersion: 1))
+        // 兜底那份自身满足规则 7：两行都下发了。
+        let request = try #require(evaluator.lastRequest)
+        #expect(request.payload["manifest"]?.objectValue?.keys.sorted() == [
+            W1.workspacesSlot, W1.workspacesDirectoryFlowSlot,
+        ].sorted())
+    }
+
+    @Test("runtime manifest 要一个宿主没实现的插槽 → 拒绝采纳，留在兜底上")
+    func refusesUnimplementableRuntimeManifest() async throws {
+        // 用户在 YAML 里手写了一个我们还没做的插槽（W2 的 `details`）。
+        let overreaching = SurfaceManifest(slots: [
+            "details": SlotEntry(mode: .native),
+        ])
+        let telemetry = RecordingTelemetry()
+        let (channel, evaluator, _) = makeChannel(telemetry: telemetry)
+        let (host, _, _) = makeHost(manifest: .w1Default, telemetry: telemetry)
+        let coordinator = SurfaceCoordinator(
+            channel: channel,
+            host: host,
+            manifest: .w1Default,
+            telemetry: telemetry,
+            manifestSource: { overreaching }
+        )
+        acceptEverything(evaluator)
+        try coordinator.start()
+        handshake(channel)
+        try await Task.sleep(for: .milliseconds(80))
+
+        // 配置写错不该让 app 起不来：退回兜底，照常接管 W1。
+        guard case .rejectedRuntime = coordinator.manifestOrigin else {
+            Issue.record("expected rejectedRuntime, got \(coordinator.manifestOrigin)")
+            return
+        }
+        #expect(coordinator.manifest.entry(for: "details").mode == .web)
+        #expect(coordinator.manifest.entry(for: W1.workspacesSlot).mode == .native)
+        #expect(coordinator.phase == .live(protocolVersion: 1))
+    }
+
+    @Test("漂移检测用采纳后的那份表（否则判的是一张没生效的表）")
+    func driftIsJudgedAgainstTheAdoptedManifest() async throws {
+        // runtime 那份要接管一个上游快照里根本不存在的插槽。
+        let authoritative = SurfaceManifest(slots: [
+            W1.workspacesSlot: SlotEntry(mode: .native),
+            "sidebar.inventedByUser": SlotEntry(mode: .native),
+        ])
+        let telemetry = RecordingTelemetry()
+        let (channel, evaluator, _) = makeChannel(telemetry: telemetry)
+        let (host, _, _) = makeHost(manifest: .w1Default, telemetry: telemetry)
+        host.register("sidebar.inventedByUser") { _ in AnyView(EmptyView()) }
+        let coordinator = SurfaceCoordinator(
+            channel: channel,
+            host: host,
+            manifest: .w1Default,
+            telemetry: telemetry,
+            manifestSource: { authoritative }
+        )
+        acceptEverything(evaluator)
+        try coordinator.start()
+        handshake(channel)
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(coordinator.manifestOrigin == .runtimeAuthority)
+        let drift = try #require(coordinator.drift)
+        #expect(drift.mismatched.contains { $0.name == "sidebar.inventedByUser" })
+        // 漂移只告警不降级。
+        #expect(coordinator.phase == .live(protocolVersion: 1))
+    }
+}
+
+
+/// G-6：**生产默认构造**必须真的能跑。
+///
+/// 这一条是被咬出来的：所有既有用例都注入假时钟（那是好习惯，测试不该真睡
+/// 15s），于是「不注入时钟」这条唯一的生产路径反而从来没被执行过。而它会在
+/// 握手成功、看门狗被取消的那一刻让整个进程 `abort()`
+/// （`freed pointer was not the last allocation`，见
+/// `DSHKit/InjectableClock.swift` 的注释）。dogfood 的症状会是「app 启动几秒后
+/// 直接退出」，而不是任何一种可诊断的降级。
+@Suite("生产默认构造：不注入假时钟也要能握手（known-gaps.md G-6）")
+@MainActor
+struct ProductionDefaultsTests {
+    @Test("默认时钟 + 默认心跳 + 默认 manifest 源：握手 → configure → live，进程不 abort")
+    func handshakeSurvivesWithProductionClocks() async throws {
+        let telemetry = RecordingTelemetry()
+        // 注意：这里**故意**一个时钟参数都不传（channel / coordinator / heartbeat
+        // 全部走默认值），这正是 StudioEnvironment 的构造方式。
+        let channel = ControlChannel(telemetry: telemetry)
+        let evaluator = FakeEvaluator()
+        evaluator.channel = channel
+        channel.attach(evaluator: evaluator)
+        let (host, _, _) = makeHost(manifest: .w1Default, telemetry: telemetry)
+        let coordinator = SurfaceCoordinator(
+            channel: channel,
+            host: host,
+            manifest: .w1Default,
+            telemetry: telemetry
+        )
+        evaluator.autoReply = { envelope in
+            guard let id = envelope.id, envelope.method == ControlMethod.surfaceConfigure else { return nil }
+            return .success(id: id, payload: .object([
+                "applied": .array([.string(W1.workspacesSlot), .string(W1.workspacesDirectoryFlowSlot)]),
+                "rejected": .array([]),
+            ]))
+        }
+        try coordinator.start()
+        channel.receive(envelope: .event(method: ControlMethod.surfaceReady, payload: .object([
+            "protocol": .number(1),
+            "slots": .array([
+                .object(["name": .string(W1.workspacesSlot), "kind": .string("single"), "scope": .string("root")]),
+                .object(["name": .string(W1.workspacesDirectoryFlowSlot), "kind": .string("single"), "scope": .string("root")]),
+            ]),
+        ])))
+        // 看门狗此刻正睡在真实时钟上并被取消 —— 崩溃就发生在这一跳。
+        try await Task.sleep(for: .milliseconds(120))
+
+        #expect(coordinator.phase == .live(protocolVersion: 1))
+        #expect(coordinator.manifestOrigin == .compiledFallback)
+        coordinator.stop()
     }
 }
