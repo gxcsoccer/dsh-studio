@@ -109,6 +109,20 @@ describe('profiles/studio/cordis.patch.yml is the authority (G-4)', () => {
   const rows = readSurfaceBlock(readFileSync(PROFILE, 'utf8'))
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as { manifest: Record<string, ProfileRow> }
 
+  test('the profile does not restate the web bundle\'s port as a fact (G-10)', () => {
+    // `shellUrl: http://127.0.0.1:3080` shipped here for weeks while
+    // scripts/dogfood.sh started the runtime on 3081, so `bridge.json` told the
+    // native half to load a port nobody served. The truthful value comes from
+    // the `webServer` service now; a hardcoded one here would silently win over
+    // it again (it is the documented override).
+    const source = readFileSync(PROFILE, 'utf8')
+    assert.doesNotMatch(
+      source,
+      /^\s*shellUrl:\s*\S/m,
+      'set shellUrl only for a proxy/tunnel — never to restate the carrier\'s own port',
+    )
+  })
+
   test('the reader actually found the two W1 rows', () => {
     assert.deepEqual(Object.keys(rows).sort(), [
       'sidebar.workspaces', 'sidebar.workspaces.directoryFlow',

@@ -79,9 +79,11 @@ struct JSONCodingKey: CodingKey {
 
 /// RPC 故障（转发官方 `RpcError` 的可用形状）。
 ///
-/// ⚠️ 契约缺口：bridge-contract.md §2.2 只规定了 `/rpc` 的**请求**体，
-/// 没有规定响应包装。这里采用 `{ ok, value | error }` 并对「裸值」做兼容
-/// 解码（见 `RPCReply`），把这个假设集中在一处而不是散在各处。
+/// 响应包装不再是「我们的假设」：`/rpc` 由 bridge **逐字转发**上游
+/// `toFetchHandler` 的回答（`bridge-server.ts handleRpc`：`response.end(text)`），
+/// 所以线上真实形状就是上游 `ServerResponse`：
+/// `{ type:"server-response", rpcId, result:{ ok:true, value } | { ok:false, error } }`
+/// （上游 `rpc.schema.ts` 的 `serverResponseSchema` / `rpcResultSchema`）。见 `RPCReply`。
 public struct RPCFault: Error, Hashable, Sendable, CustomStringConvertible {
     public let code: String
     public let message: String
@@ -103,18 +105,57 @@ public struct RPCFault: Error, Hashable, Sendable, CustomStringConvertible {
 
 /// `/rpc` 响应的解包。
 public enum RPCReply {
-    /// `{ ok:true, value }` / `{ ok:false, error }` / 裸值三种形态都能吃。
+    /// 解包失败：我们**没读懂**对端的回答。
+    ///
+    /// 与 `RPCFault` 严格区分：`RPCFault` 是「读懂了，上游说这次业务失败」，
+    /// 这个是「连信封都不认识」——版本/契约不一致，重试网络无用，必须画成
+    /// 失败态（`DSHClient` 把它翻成 `.protocolBroken`）。
+    public struct EnvelopeError: Error, Hashable, Sendable, CustomStringConvertible {
+        public let detail: String
+        public init(_ detail: String) { self.detail = detail }
+        public var description: String { detail }
+    }
+
+    /// 吃官方信封 `{ type:"server-response", rpcId, result:{ ok, value|error } }`，
+    /// 以及裸的 `result` 本体 `{ ok, value|error }`。
+    ///
+    /// ⚠️ **不要**再加「裸值兜底」。历史教训（known-gaps G-11）：这里曾经以
+    /// `return value` 收尾，于是官方信封整个被当成业务值交给上层——
+    /// `WorkspaceListValue` 在 `{type,rpcId,result}` 上找不到 `items`，配合当时
+    /// 的 `try? … ?? []` 就静默变成「零个工作区」。侧栏于是在一个**完全健康**的
+    /// runtime 上理直气壮显示「暂无会话」。宽容解析在这里不是鲁棒性，是把
+    /// 「没读懂」伪装成「没数据」。
     public static func unwrap(_ value: JSONValue) throws -> JSONValue {
-        guard let fields = value.objectValue else { return value }
-        if let ok = fields["ok"]?.boolValue {
-            if ok {
-                return fields["value"] ?? fields["result"] ?? .object([:])
+        guard let fields = value.objectValue else {
+            throw EnvelopeError("response is not a JSON object: \(value.description.prefix(200))")
+        }
+        // 官方信封：只认 type 明写的那两种，且必须带 result。
+        if let type = fields["type"]?.stringValue {
+            guard type == "server-response" || type == "client-response" else {
+                throw EnvelopeError("unexpected envelope type \"\(type)\"")
             }
+            guard let result = fields["result"] else {
+                throw EnvelopeError("envelope \"\(type)\" has no result")
+            }
+            return try unwrapResult(result)
+        }
+        // 裸 result 本体。
+        if fields["ok"] != nil {
+            return try unwrapResult(value)
+        }
+        throw EnvelopeError("response is neither a server-response envelope nor an { ok, … } result")
+    }
+
+    private static func unwrapResult(_ result: JSONValue) throws -> JSONValue {
+        guard let fields = result.objectValue, let ok = fields["ok"]?.boolValue else {
+            throw EnvelopeError("result is not { ok:Bool, … }")
+        }
+        guard ok else {
             throw RPCFault.decode(fields["error"] ?? .null)
         }
-        if let error = fields["error"], !error.isNull {
-            throw RPCFault.decode(error)
-        }
-        return value
+        // void 业务结果序列化后确实没有 `value`（上游注释：a void business
+        // result serializes with no `value` field at all）→ 空对象是对的。
+        // 但**只有**这一种缺失是合法的：带数据的方法自己的二次解码仍会失败。
+        return fields["value"] ?? .object([:])
     }
 }

@@ -33,13 +33,22 @@
           # number, and a silent divergence between the two is a "runtime
           # offline" screen with no diagnostic.
           port: 43180
-          # Published to the native half as the handshake's `webUrl` — the
-          # address it loads into its WKWebView. It must match what the
-          # `webserver` row actually binds: the web bundle's fallback is
-          # 127.0.0.1:3080, and `--port`/`--host` on the dsh invocation moves
-          # it, so a non-default launch has to restate this value (or export
-          # DSH_STUDIO_SHELL_URL on the app side, which wins over the file).
-          shellUrl: http://127.0.0.1:3080
+          # `shellUrl` is deliberately NOT set here.
+          #
+          # It used to say `http://127.0.0.1:3080` — the web bundle's *default*
+          # port, restated as if it were a fact. Every non-default launch
+          # (`--port 3081`, which is what scripts/dogfood.sh does, a `port: 0`
+          # composition, or a busy 3080) then published a handshake pointing at
+          # a port nobody serves, and the native half loaded a dead URL into its
+          # WKWebView: a blank window with no diagnostic, because an address
+          # that exists silences both the retry loop and the "runtime offline"
+          # screen. Absence would have been strictly better; truth is better
+          # still, so `studio-surface` now reads the port off the `webServer`
+          # service that owns the socket (packages/studio-surface/src/shell-url.ts).
+          #
+          # Set it only when a client cannot reach the carrier's own address —
+          # a reverse proxy, an SSH tunnel, a container port mapping — because
+          # that is the one thing the runtime cannot observe about itself.
         # ── the W1 migration ledger (surface-manifest.md §1) ────────────────
         #
         # Two rows, bottom-up, because rule 7 (§4.7) is bottom-up: a `native`

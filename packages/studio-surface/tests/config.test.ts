@@ -45,12 +45,13 @@ describe('defaults', () => {
     assert.equal(LOOPBACK_ADDRESS, '127.0.0.1')
   })
 
-  test('the shell URL is opt-in: unset publishes no webUrl at all (§2.1)', () => {
+  test('the shell URL is an override, not a default: unset means "ask the carrier" (§2.1)', () => {
     // The handshake carries what the deployment knows and nothing more. An
-    // invented default (127.0.0.1:3080) would make a native half load the wrong
-    // page on any run that moved the web bind.
+    // invented default (127.0.0.1:3080) made the native half load the wrong
+    // page on any run that moved the web bind — so the schema keeps the field
+    // empty and `resolveShellUrl` derives the truth from `webServer`.
     assert.equal(resolve({}).bridge.shellUrl, '')
-    assert.equal(resolve({ bridge: { shellUrl: 'http://127.0.0.1:3080' } }).bridge.shellUrl, 'http://127.0.0.1:3080')
+    assert.equal(resolve({ bridge: { shellUrl: 'http://proxy.internal' } }).bridge.shellUrl, 'http://proxy.internal')
   })
 
   test('a listed row defaults to web / evacuated / -1', () => {

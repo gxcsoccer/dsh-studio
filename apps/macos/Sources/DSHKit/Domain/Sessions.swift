@@ -162,9 +162,17 @@ public struct WorkspaceListValue: Hashable, Sendable, Codable {
         self.archivedSessionIds = archivedSessionIds
     }
 
+    /// 手写解码的**唯一**理由：`archivedSessionIds` 是后加的字段，老 runtime 不发它，
+    /// 缺失时当空集合是安全的（「没有归档」与「不知道有没有归档」在渲染上同义）。
+    ///
+    /// ⚠️ `items` 则**必须**存在，不许 `decodeIfPresent ?? []`。
+    /// 那样写等于把「上游把 `items` 改名了 / 多包了一层」翻译成「你没有工作区」——
+    /// 一句关于用户数据的断言，建立在我们根本没读懂回答的前提上。列表为空要么是
+    /// 真的空，要么是链路失败，这两件事必须在类型层面就分得开（见
+    /// `DSHClient.dataAvailability`）。宁可抛错走失败态，也不静默降级成空态。
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        items = try container.decodeIfPresent([WorkspaceView].self, forKey: .items) ?? []
+        items = try container.decode([WorkspaceView].self, forKey: .items)
         archivedSessionIds = try container.decodeIfPresent([SessionID].self, forKey: .archivedSessionIds) ?? []
     }
 }

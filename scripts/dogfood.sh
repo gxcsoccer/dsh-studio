@@ -74,5 +74,15 @@ fi
 # `open` drops the environment, so exec the binary inside the bundle directly.
 # DSH_HOME matters: without it the shell cannot find bridge.json and silently
 # falls back to its compiled-in manifest instead of the runtime's authority.
-say "launching DSH Studio against 127.0.0.1:$PORT"
-DSH_STUDIO_SHELL_URL="http://127.0.0.1:$PORT" exec "$APP_BINARY"
+#
+# DSH_STUDIO_SHELL_URL is deliberately NOT set here.
+#
+# It used to be, and that is precisely why nobody noticed that `bridge.json`
+# published `webUrl: http://127.0.0.1:3080` while this script serves 3081: the
+# env override wins on the app side, so the dogfood run — the only run anyone
+# looks at — was the one run in which the wrong value could not hurt. The
+# handshake is now derived from the port the runtime actually bound, so let the
+# app read it and let a divergence be visible. Export the variable yourself if
+# you need the escape hatch (it still wins).
+say "launching DSH Studio against 127.0.0.1:$PORT (shell address comes from bridge.json)"
+exec "$APP_BINARY"

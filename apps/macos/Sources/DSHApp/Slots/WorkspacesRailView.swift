@@ -83,7 +83,14 @@ struct WorkspacesRailView: View {
                 .padding(.top, SidebarTokens.sectionHeaderTopMargin)
                 .padding(.trailing, SidebarTokens.sectionHeaderTrailingOutset)
                 .padding(.bottom, SidebarTokens.sectionHeaderBottomMargin)
-            if let banner = client.link.bannerText {
+            // 横幅与列表里的失败态说的是**同一件事**，所以只说一次。
+            //
+            // 列表自己已经画了失败态（`.unavailable`：零行 + 原因 + 重试）时，
+            // 横幅就是同一句话的第二遍 —— 244px 宽的一列里重复两遍红字，读者
+            // 反而更难判断发生了什么。只有**还有行**的时候横幅才不可替代：那时
+            // 列表画的是仍然有效的旧事实，横幅说的是链路怎么了、列表末尾那句
+            // `staleNotice` 说的是这些行还能不能信（见 `.stale`）。
+            if let banner = client.link.bannerText, !client.dataAvailability.isUnavailable {
                 disconnectionBanner(banner)
             }
             sessionList
@@ -200,7 +207,7 @@ struct WorkspacesRailView: View {
                     // workspace title）。
                     section(title: "未分组", path: nil, sessions: loose)
                 }
-                if isEmptyEverywhere { emptyState }
+                listStatus
             }
             .padding(.bottom, SidebarTokens.listBottomPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -222,6 +229,57 @@ struct WorkspacesRailView: View {
         .accessibilityHint("使用 Tab 与方向键在会话间移动，回车打开")
     }
 
+    /// 列表末尾那一行状态 —— **三态分开画**。
+    ///
+    /// 本轮修的 bug 就在这里：这块地方原来只区分「没会话」与「搜索无匹配」，
+    /// 于是数据通道断了（进程死了 / token 过期 / 协议漂移）时，用户看到的是
+    /// 一句语气笃定的「暂无会话」。控制通道那边我们花了心跳 + 崩溃退位去避免
+    /// 「显示得好好的但其实是死的」，数据通道上却留了同一个坑，而且更阴险：
+    /// 控制通道死了会整块退回官方 Web UI，这个只会安静地告诉用户「你没有会话」。
+    ///
+    /// 判据不在视图里，在 `DSHClient.dataAvailability`（纯函数、可单测）：视图
+    /// 只把四个分支映射到四种画法。下一个列表插槽（W2）照抄这个 `switch` 即可。
+    @ViewBuilder
+    private var listStatus: some View {
+        switch client.dataAvailability {
+        case .unavailable(let reason, let retryable):
+            failureState(reason: reason, retryable: retryable)
+        case .pending:
+            connectingState
+        case .empty:
+            emptyState
+        case .stale(let reason, _):
+            // 行还在上面画着，但它们是**上一次成功读到**的样子。这里补一句
+            // 「可能已过期」：不写这句，一份冻住的列表和正常运行长得一模一样
+            // （G-13）。搜索过滤空了也照样要说，过期和过滤是两件独立的事。
+            VStack(alignment: .leading, spacing: 0) {
+                if !searchText.isEmpty, isFilteredToNothing { searchStatus }
+                staleNotice(reason: reason)
+            }
+        case .populated:
+            // 有行但被搜索过滤空了 → 上游的 `.searchStatus`。
+            if !searchText.isEmpty, isFilteredToNothing { searchStatus }
+        }
+    }
+
+    /// 「你看到的可能不是现在」—— 过期提示。
+    ///
+    /// 排版沿用 `.searchStatus`（12px / 10-12），墨色用 `errorPrimary`：它是
+    /// 一句关于**可信度**的警告，不是终态结论，所以不占 `.empty` 那个盒子。
+    ///
+    /// 文案里**不重复**失败原因：那句已经在顶部横幅里了（横幅在有行时一定会
+    /// 显示）。两处各说一件事 —— 横幅说链路怎么了，这里说屏幕上这些行还能不能
+    /// 当现状；原因说两遍只会让 244px 宽的一列更难读。
+    private func staleNotice(reason: DisconnectReason?) -> some View {
+        Text("以上是最后一次同步的结果，可能已过期")
+            .font(SidebarTokens.meta)
+            .foregroundStyle(SidebarTokens.errorPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, SidebarTokens.emptyHorizontalPadding)
+            .padding(.vertical, SidebarTokens.searchStatusVerticalPadding)
+            .accessibilityLabel("列表可能已过期：\(reason?.headline ?? "正在重连")")
+    }
+
     /// 空态与「搜索无结果」是上游的**两个**类：`.empty`（13px / padding 16-12）
     /// 与 `.searchStatus`（12px / padding 10-12）。合成一个会让搜索态的空行
     /// 忽然长高 6px。
@@ -233,16 +291,79 @@ struct WorkspacesRailView: View {
                 .foregroundStyle(SidebarTokens.labelTertiary)
                 .padding(.horizontal, SidebarTokens.emptyHorizontalPadding)
                 .padding(.vertical, SidebarTokens.emptyVerticalPadding)
+                .accessibilityLabel("暂无会话")
         } else {
-            Text("无匹配结果")
-                .font(SidebarTokens.meta)
-                .foregroundStyle(SidebarTokens.labelTertiary)
-                .padding(.horizontal, SidebarTokens.emptyHorizontalPadding)
-                .padding(.vertical, SidebarTokens.searchStatusVerticalPadding)
+            searchStatus
         }
     }
 
-    private var isEmptyEverywhere: Bool {
+    /// `.searchStatus`：12px / padding 10-12。**不许**与 `.empty` 合并。
+    private var searchStatus: some View {
+        Text("无匹配结果")
+            .font(SidebarTokens.meta)
+            .foregroundStyle(SidebarTokens.labelTertiary)
+            .padding(.horizontal, SidebarTokens.emptyHorizontalPadding)
+            .padding(.vertical, SidebarTokens.searchStatusVerticalPadding)
+    }
+
+    /// 「还在连」—— 既不是空也不是失败，所以它自己是一态。
+    ///
+    /// 沿用 `.searchStatus` 的排版（12px / 10-12）而不是 `.empty`：它是一句
+    /// 过程性的状态说明，和「搜索无结果」同一类，不是终态结论。
+    private var connectingState: some View {
+        Text("正在连接 dsh runtime…")
+            .font(SidebarTokens.meta)
+            .foregroundStyle(SidebarTokens.labelTertiary)
+            .padding(.horizontal, SidebarTokens.emptyHorizontalPadding)
+            .padding(.vertical, SidebarTokens.searchStatusVerticalPadding)
+            .accessibilityLabel("正在连接 dsh runtime")
+    }
+
+    /// **失败态**：说清是「连接问题」，不是「你没有会话」，并给一颗能点的重试。
+    ///
+    /// 视觉沿用上游 `.empty` 的排版盒（padding 16-12、13px 标题），颜色用既有
+    /// 的 `errorPrimary` / `labelTertiary` / `businessPrimary` 三个 token
+    /// （与断连横幅同源），不引入新的字号或颜色。
+    private func failureState(reason: DisconnectReason, retryable: Bool) -> some View {
+        VStack(alignment: .leading, spacing: SidebarTokens.groupSpacing) {
+            HStack(spacing: SidebarTokens.rowGap) {
+                // 与断连横幅同一个字形：两处说的是同一件事。
+                Image(systemName: "bolt.horizontal.circle")
+                    .font(SidebarTokens.meta)
+                Text(reason.headline ?? "连不上 dsh runtime")
+                    .font(SidebarTokens.empty)
+                    .lineLimit(2)
+            }
+            .foregroundStyle(SidebarTokens.errorPrimary)
+            if let remedy = reason.remedy {
+                Text(remedy)
+                    .font(SidebarTokens.meta)
+                    .foregroundStyle(SidebarTokens.labelTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // 这一句是空态与失败态的分界线，用**正面陈述**而不是自我辩解：
+            // 说清「零行的成因是连接，不是你的数据」，而不是引用另一处 UI 文案。
+            Text("列表为空是连不上导致的，不是你没有会话。")
+                .font(SidebarTokens.meta)
+                .foregroundStyle(SidebarTokens.labelTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(retryable ? "重试连接" : "修好后重试") { client.retryNow() }
+                .buttonStyle(.plain)
+                .font(SidebarTokens.meta)
+                .foregroundStyle(SidebarTokens.businessPrimary)
+                .accessibilityLabel("重新连接 dsh runtime")
+                .accessibilityHint(reason.remedy ?? "重新读取 bridge.json 并重连数据通道")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, SidebarTokens.emptyHorizontalPadding)
+        .padding(.vertical, SidebarTokens.emptyVerticalPadding)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("数据通道不可用")
+        .accessibilityValue(reason.headline ?? reason.code)
+    }
+
+    /// 搜索把所有行都过滤掉了吗（只在**确实有数据**时才有意义）。
+    private var isFilteredToNothing: Bool {
         client.workspaces.allSatisfy { filtered(client.visibleSessions(in: $0)).isEmpty }
             && filtered(client.looseSessions()).isEmpty
     }

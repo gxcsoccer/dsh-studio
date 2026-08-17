@@ -6,17 +6,24 @@ import Foundation
 // MARK: - 测试替身
 
 /// 可控时钟：断线续传窗口的判定完全靠它，测试不需要真的等两分钟。
+///
+/// `autoAdvancingBy` 让每次读钟自动前进 —— 用来表达「这一轮连接活了一会儿」
+/// （退避归零的稳定窗口判据），而不必在后台循环里插手。
 final class TestClock: @unchecked Sendable {
     private let lock = NSLock()
     private var value: Date
+    private let step: TimeInterval
 
-    init(_ value: Date = Date(timeIntervalSince1970: 1_700_000_000)) {
+    init(_ value: Date = Date(timeIntervalSince1970: 1_700_000_000), autoAdvancingBy step: TimeInterval = 0) {
         self.value = value
+        self.step = step
     }
 
     var current: Date {
         lock.lock(); defer { lock.unlock() }
-        return value
+        let snapshot = value
+        value = value.addingTimeInterval(step)
+        return snapshot
     }
 
     func advance(by seconds: TimeInterval) {
@@ -41,9 +48,20 @@ final class FakeTransport: DSHTransport, @unchecked Sendable {
     private var _posts: [Recorded] = []
     private var _streams: [Recorded] = []
     private var _rpcValues: [String: JSONValue] = [:]
+    /// 整包响应体覆盖（见 `setRawReplyBody`）：只给信封自身的用例。
+    private var _rawBodies: [String: JSONValue] = [:]
     private var _postStatus = 200
     private var _streamStatus = 200
     private var _scripts: [String] = []
+    /// 逐次消费的 `openStream` 状态码脚本（用完回落到 `streamStatus`）。
+    private var _streamStatusScript: [Int] = []
+    /// 注入的传输层异常（模拟 surface 进程死了 / 超时）。
+    private var _postError: (any Error)?
+    private var _streamError: (any Error)?
+    /// 是否把流**挂住不结束** —— 这是唯一能让客户端停在 `.live` 的办法，
+    /// 而 `.live` 恰恰是「敢说暂无会话」的前提，非测不可。
+    private var _holdStream = false
+    private var _held: [AsyncThrowingStream<Data, any Error>.Continuation] = []
 
     init(rpcValues: [String: JSONValue] = [:], scripts: [String] = []) {
         _rpcValues = rpcValues
@@ -68,8 +86,66 @@ final class FakeTransport: DSHTransport, @unchecked Sendable {
         set { sync { _streamStatus = newValue } }
     }
 
+    var postError: (any Error)? {
+        get { sync { _postError } }
+        set { sync { _postError = newValue } }
+    }
+
+    var streamError: (any Error)? {
+        get { sync { _streamError } }
+        set { sync { _streamError = newValue } }
+    }
+
+    var holdStreamOpen: Bool {
+        get { sync { _holdStream } }
+        set { sync { _holdStream = newValue } }
+    }
+
+    var heldStreamCount: Int { sync { _held.count } }
+
+    /// 排一串 `openStream` 状态码：让「连 N 次都失败，第 N+1 次 401」这类
+    /// 剧本可写，从而后台重连循环能**自然终止**（401 不可重试），测试不必和
+    /// 一个永不停止的 loop 赛跑。
+    func enqueueStreamStatuses(_ statuses: [Int]) {
+        sync { _streamStatusScript.append(contentsOf: statuses) }
+    }
+
+    /// 结束被挂住的流（`error != nil` 时模拟传输中途炸掉）。
+    func finishHeldStreams(throwing error: (any Error)? = nil) {
+        let continuations = sync { () -> [AsyncThrowingStream<Data, any Error>.Continuation] in
+            let held = _held
+            _held = []
+            return held
+        }
+        for continuation in continuations { continuation.finish(throwing: error) }
+    }
+
+    /// 往挂住的流里补一段 SSE 文本。
+    func push(_ text: String) {
+        let continuations = sync { _held }
+        for continuation in continuations { continuation.yield(Data(text.utf8)) }
+    }
+
     func setRPCValue(_ value: JSONValue, for method: RPCMethod) {
         sync { _rpcValues[method.rawValue] = value }
+    }
+
+    /// 让某个方法回一份**整个响应体**（绕过信封封装）。
+    ///
+    /// 只给「信封本身就是被测对象」的用例：真实 bridge 逐字转发上游
+    /// `server-response`，所以默认路径必须走 `envelope(_:)`，不许各测试自己
+    /// 编造包装——那正是 G-11 能藏进 200 个绿测试的原因。
+    func setRawReplyBody(_ body: JSONValue, for method: RPCMethod) {
+        sync { _rawBodies[method.rawValue] = body }
+    }
+
+    /// 生产线上真实的 `/rpc` 响应体（上游 `ServerResponse`，由 bridge 逐字转发）。
+    static func envelope(_ value: JSONValue) -> JSONValue {
+        .object([
+            "type": .string("server-response"),
+            "rpcId": .string(UUID().uuidString),
+            "result": .object(["ok": .bool(true), "value": value]),
+        ])
     }
 
     /// 排一段 SSE 文本；每次 `openStream` 消费一段，用完则立刻结束流。
@@ -79,12 +155,16 @@ final class FakeTransport: DSHTransport, @unchecked Sendable {
 
     func post(path: String, body: Data, headers: [String: String]) async throws -> HTTPReply {
         let record = Recorded(path: path, headers: headers, body: body)
-        let (status, value) = sync { () -> (Int, JSONValue) in
+        let (status, value, raw, error) = sync { () -> (Int, JSONValue, JSONValue?, (any Error)?) in
             _posts.append(record)
             let method = (try? JSONValue.decode(body))?["method"]?.stringValue ?? ""
-            return (_postStatus, _rpcValues[method] ?? .object([:]))
+            return (_postStatus, _rpcValues[method] ?? .object([:]), _rawBodies[method], _postError)
         }
-        let payload = JSONValue.object(["ok": .bool(true), "value": value])
+        if let error { throw error }
+        // ⚠️ 这里曾经回 `{ ok:true, value }` —— 一个真实 bridge **从不产生**的形状。
+        // 于是 200 个测试全绿，而线上 `workspace.list` 永远解不开（G-11）。
+        // 测试替身必须说线上那句话。
+        let payload = raw ?? Self.envelope(value)
         return HTTPReply(status: status, body: try payload.encoded())
     }
 
@@ -93,13 +173,19 @@ final class FakeTransport: DSHTransport, @unchecked Sendable {
         headers: [String: String]
     ) async throws -> (status: Int, chunks: AsyncThrowingStream<Data, any Error>) {
         let record = Recorded(path: path, headers: headers, body: Data())
-        let (status, script) = sync { () -> (Int, String?) in
+        let (status, script, error, hold) = sync { () -> (Int, String?, (any Error)?, Bool) in
             _streams.append(record)
-            return (_streamStatus, _scripts.isEmpty ? nil : _scripts.removeFirst())
+            let status = _streamStatusScript.isEmpty ? _streamStatus : _streamStatusScript.removeFirst()
+            return (status, _scripts.isEmpty ? nil : _scripts.removeFirst(), _streamError, _holdStream)
         }
+        if let error { throw error }
         let stream = AsyncThrowingStream<Data, any Error> { continuation in
             if let script { continuation.yield(Data(script.utf8)) }
-            continuation.finish()
+            if hold {
+                sync { _held.append(continuation) }
+            } else {
+                continuation.finish()
+            }
         }
         return (status, stream)
     }
@@ -158,12 +244,23 @@ private func workspaceListValue(
     ])
 }
 
-private func sessionListValue(_ ids: [String], blank: Bool = false) -> JSONValue {
+/// 一份 `session.list` 全量。
+///
+/// `running` 必须由用例说清楚：上游这一列读的是 `agent.status`（请求那一刻的活
+/// 进程状态，见 `api-proxy.ts` 的 `summarize`），所以全量刷新**理应**覆盖事件推断
+/// 出来的 running。若某个用例先喂一帧 `running:true`、又让替身在随后的全量里回
+/// `running:false`，那测的已经不是客户端，而是「替身在自我矛盾」——真 runtime
+/// 永远不会这么答（G-11 的教训：替身说假话，测试就替 bug 背书）。
+private func sessionListValue(
+    _ ids: [String],
+    blank: Bool = false,
+    running: Bool = false
+) -> JSONValue {
     .object(["items": .array(ids.map { id in
         .object([
             "sessionId": .string(id),
             "updatedAt": .number(1),
-            "running": .bool(false),
+            "running": .bool(running),
             "blank": .bool(blank),
             "cwd": .string("/tmp/demo"),
         ])
@@ -193,7 +290,8 @@ struct DSHClientStreamTests {
     func firstRunTakesSnapshotThenStreams() async throws {
         let transport = FakeTransport(rpcValues: [
             RPCMethod.workspaceList.rawValue: workspaceListValue(),
-            RPCMethod.sessionList.rawValue: sessionListValue(["s-1"]),
+            // 替身模拟「读模型还没追上」：行还写着 blank:true，且不带 asOfSeq。
+            RPCMethod.sessionList.rawValue: sessionListValue(["s-1"], blank: true),
         ])
         transport.enqueueScript(sessionFrame(id: "s-1", seq: 5, type: "turn/start"))
         let client = makeClient(transport: transport)
@@ -201,8 +299,13 @@ struct DSHClientStreamTests {
         let retry = await client.runOnce()
 
         #expect(retry) // 流正常结束 → 重连有意义
-        #expect(client.snapshotLoadCount == 1)
-        #expect(transport.posts.map(\.method) == ["workspace.list", "session.list"])
+        // 两次全量：连上先对齐一次，`turn/start` 让「谁该显示」失效后再对齐一次
+        // （blank 与工作区归属都只有全量知道，G-13）。
+        #expect(client.snapshotLoadCount == 2)
+        #expect(transport.posts.map(\.method) == [
+            "workspace.list", "session.list", // 连上先对齐
+            "workspace.list", "session.list", // turn/start → 重读
+        ])
         #expect(transport.posts.allSatisfy { $0.headers["Authorization"] == "Bearer t0ken" })
         #expect(transport.posts.allSatisfy { $0.path == "/rpc" })
 
@@ -214,11 +317,16 @@ struct DSHClientStreamTests {
 
         #expect(client.lastEventID == "5")
         #expect(client.workspaces.count == 1)
-        #expect(client.sessionsByID[SessionID("s-1")]?.running == true)
+        // 全量那一行比我们的流旧，就不许它把已经发过话的会话说回「空」——
+        // 否则刚出现的一行会闪回「暂无会话」。
+        #expect(client.sessionsByID[SessionID("s-1")]?.blank == false)
         #expect(client.link == .disconnected(reason: .streamEnded, since: client.link.disconnectedSince ?? Date()))
     }
 
-    @Test("断线续传：第二次连接带 Last-Event-ID，且不重拉快照")
+    /// 契约变更（G-13）：续传保留 `Last-Event-ID`（不丢事件），但**仍然**重拉
+    /// 一次全量。原来「续传就不重拉」省下的那两个 loopback RPC，代价是列表可能
+    /// 永久错误 —— `blank` 与工作区归属都不在增量里。
+    @Test("断线续传：带 Last-Event-ID 接着听，同时重新对齐全量")
     func resumesWithLastEventID() async throws {
         let transport = FakeTransport(rpcValues: [
             RPCMethod.workspaceList.rawValue: workspaceListValue(),
@@ -233,9 +341,11 @@ struct DSHClientStreamTests {
         clock.advance(by: 3) // 断了 3s，远小于 120s 保留窗口
         await client.runOnce()
 
-        #expect(client.snapshotLoadCount == 1) // 没有第二次全量
+        // 1 连上对齐 + 2 `turn/start` 触发重读 + 3 重连再对齐。
+        // （`turn/end` 只改 running，不影响成员，故不触发重读。）
+        #expect(client.snapshotLoadCount == 3)
         #expect(transport.streams.count == 2)
-        #expect(transport.streams[1].headers["Last-Event-ID"] == "5")
+        #expect(transport.streams[1].headers["Last-Event-ID"] == "5") // 游标没丢
         #expect(client.lastEventID == "6")
         #expect(client.sessionsByID[SessionID("s-1")]?.running == false)
     }
@@ -255,7 +365,7 @@ struct DSHClientStreamTests {
         clock.advance(by: 600) // 超出保留窗口
         await client.runOnce()
 
-        #expect(client.snapshotLoadCount == 2)
+        #expect(client.snapshotLoadCount == 3) // 同上：对齐 + turn/start 重读 + 重连对齐
         #expect(transport.streams.count == 2)
         #expect(transport.streams[1].headers["Last-Event-ID"] == nil)
         #expect(client.lastEventID == "900")
@@ -263,7 +373,12 @@ struct DSHClientStreamTests {
 
     @Test("token 被拒（401）→ 不再重试，状态可见")
     func unauthorizedIsTerminal() async throws {
-        let transport = FakeTransport()
+        // 快照本身是好的（形状合法），被拒的是事件流 —— 否则先撞上的会是
+        // 「读不懂 workspace.list」，测的就不是 401 了。
+        let transport = FakeTransport(rpcValues: [
+            RPCMethod.workspaceList.rawValue: workspaceListValue(),
+            RPCMethod.sessionList.rawValue: sessionListValue(["s-1"]),
+        ])
         transport.streamStatus = 401
         let client = makeClient(transport: transport)
         let retry = await client.runOnce()
@@ -286,7 +401,9 @@ struct DSHClientStreamTests {
             reason: .runtimeNotRunning("/tmp/none/bridge.json"),
             since: client.link.disconnectedSince ?? Date()
         ))
-        #expect(client.link.bannerText == "与 dsh runtime 失联：runtime 未运行")
+        #expect(client.link.bannerText?.contains("连不上 dsh runtime") == true)
+        // 横幅必须把「下一步」也说出来（分类的价值全在这一栏）。
+        #expect(client.link.bannerText?.contains("/tmp/none/bridge.json") == true)
         #expect(transport.streams.isEmpty)
     }
 
@@ -316,24 +433,32 @@ struct DSHClientStreamTests {
         #expect(client.link.bannerText?.contains("HTTP 503") == true)
     }
 
-    @Test("坏掉的 SSE data 不中断流，只记账")
+    @Test("坏掉的 SSE data 不中断流，只记账，并用全量兜回丢掉的那一帧")
     func malformedFrameIsRecorded() async throws {
         let transport = FakeTransport(rpcValues: [
             RPCMethod.workspaceList.rawValue: workspaceListValue(),
-            RPCMethod.sessionList.rawValue: sessionListValue(["s-1"]),
+            // 真 runtime 在 turn/start 之后就是这么答的：跑着、且不再是空会话。
+            RPCMethod.sessionList.rawValue: sessionListValue(["s-1"], running: true),
         ])
         transport.enqueueScript("id: 1\nevent: session\ndata: not json\n\n" + sessionFrame(id: "s-1", seq: 2, type: "turn/start"))
         let client = makeClient(transport: transport)
         await client.runOnce()
         #expect(client.unknownFrames.count == 1)
+        // 解不开一帧 = 增量有洞。记账之外还必须重读全量，否则我们会带着窟窿
+        // 继续宣称 live（G-13）。
+        #expect(client.snapshotLoadCount == 2)
         #expect(client.sessionsByID[SessionID("s-1")]?.running == true)
+        #expect(client.sessionsByID[SessionID("s-1")]?.blank == false)
     }
 
-    @Test("host / projection 帧驱动侧栏（契约缺口：文档只写了 event: session）")
+    /// 两件事一起钉：`event: host` / mux 投影帧确实被解码进状态机；随后的全量
+    /// 刷新**不会**把比它更新的投影擦掉（否则表现为「标题闪一下就没了」）。
+    @Test("host / projection 帧驱动侧栏，且不被随后的全量刷新擦掉")
     func consumesHostAndProjectionFrames() async throws {
         let transport = FakeTransport(rpcValues: [
             RPCMethod.workspaceList.rawValue: workspaceListValue(sessions: ["s-1"]),
-            RPCMethod.sessionList.rawValue: sessionListValue(["s-1"]),
+            // 全量里这一行还没带上标题（投影走增量先到）——正是会擦掉标题的时序。
+            RPCMethod.sessionList.rawValue: sessionListValue(["s-1"], running: true),
         ])
         transport.enqueueScript(
             hostFrame(["type": .string("host/session-status"), "sessionId": .string("s-1"), "running": .bool(true)], seq: 1)
@@ -347,6 +472,8 @@ struct DSHClientStreamTests {
         #expect(client.sessionsByID[SessionID("s-1")]?.projections?.title == "重构侧栏")
         #expect(client.unknownFrames == ["host/telepathy"])
         #expect(client.lastEventID == "3")
+        // host/* 是列表失效信号（连没建模的 host/telepathy 也算）→ 重读一次。
+        #expect(client.snapshotLoadCount == 2)
     }
 
     @Test("studio.* 不许走官方 /rpc 转发面")

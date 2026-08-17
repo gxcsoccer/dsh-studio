@@ -87,6 +87,52 @@ struct ArchitectureGuardTests {
         #expect(appUsers == ["WebContainer.swift"])
     }
 
+    /// **本轮 bug 的防复发守卫。**
+    ///
+    /// 「暂无会话」是一句关于**用户数据**的断言，只有在链路可信时才成立。原生
+    /// 侧栏曾经直接用 `列表.isEmpty` 当空态判据，于是 runtime 连不上时也理直
+    /// 气壮地写「暂无会话」。判据必须来自数据通道的读模型
+    /// （`DSHClient.dataAvailability`），不许视图自己推理 —— W2 的下一个列表
+    /// 会照抄 W1，所以这条得是机器守的，不是 review 守的。
+    @Test("凡是画空态的视图，必须先问过 dataAvailability")
+    func emptyStatesMustConsultTheReadModel() throws {
+        let claims = ["暂无", "没有会话", "还没有会话"]
+        for file in try swiftFiles(in: "DSHApp") {
+            let says = claims.contains { file.text.contains($0) }
+            guard says else { continue }
+            #expect(
+                file.text.contains("dataAvailability"),
+                """
+                DSHApp/\(file.name) 写了「暂无…」，却没有 switch `dataAvailability` \
+                —— 空态与失败态会长成同一个样子（docs/known-gaps.md G-9）
+                """
+            )
+        }
+    }
+
+    /// 快照解码不许「宽容」到把协议漂移变成空列表。
+    ///
+    /// `try? … ?? []` 这类兜底是本轮 bug 的源头：读不懂对端的回答，却产出一份
+    /// 「零个工作区、零个会话」的成功快照。列表主体的解码必须要么成功要么抛。
+    @Test("数据通道不许用 `try?` 把解码失败兜成空表")
+    func snapshotDecodingIsStrict() throws {
+        let offender = try NSRegularExpression(pattern: #"try\?[^\n]*\?\?\s*(\[\]|\.init\(\)|empty)"#)
+        for target in ["DSHKit", "DSHClient"] {
+            for file in try swiftFiles(in: target) {
+                for (index, line) in file.text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                    let text = String(line)
+                    let trimmed = text.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.hasPrefix("//"), !trimmed.hasPrefix("///") else { continue }
+                    let range = NSRange(text.startIndex..<text.endIndex, in: text)
+                    #expect(
+                        offender.firstMatch(in: text, range: range) == nil,
+                        "\(target)/\(file.name):\(index + 1) 把解码失败兜成了空集合 —— 静默降级成空态，正是要修的那个 bug"
+                    )
+                }
+            }
+        }
+    }
+
     /// G-6 的源码守卫。
     ///
     /// 时钟缝（`sleeper`）的默认值写成默认参数里的 async 闭包字面量，会让**只走

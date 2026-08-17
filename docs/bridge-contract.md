@@ -190,36 +190,56 @@ client 半的义务只有一条：**`surface/ping` 的处理器必须在插件�
 | `token` | string | 一次性 Bearer token（256 bit hex）。缺失或为空 → 宿主拒绝以未认证方式通信 |
 | `protocol` | number | 控制通道协议版本，与 `surface/ready` 里的 `protocol` 同源（§1.2） |
 | `pid` | number | 写文件的 dsh 进程号，仅用于诊断「文件是谁留下的」 |
-| `webUrl` | string?（可选） | 官方 Web 壳地址，宿主 WKWebView 要加载的那一个。来自 `studio-surface` 的 `bridge.shellUrl` 配置；**未配置时整个字段不出现**（不是空串），宿主据此区分「还没发布」与「发布了一个空地址」，并退回自己的 `DSH_STUDIO_SHELL_URL` 环境变量 |
+| `webUrl` | string?（可选） | 官方 Web 壳地址，宿主 WKWebView 要加载的那一个。**优先级：`bridge.shellUrl` 配置（有反代/隧道时的显式声明）> `webServer` 服务实际监听的 `host:port` > 不出现**。字段**不出现**（不是空串）意味着「还没有可信地址」，宿主据此在「等待并重试」与「用自己的 `DSH_STUDIO_SHELL_URL` 覆盖」之间选择 |
 
-`webUrl` 是配置而不是插件自己推导的值：浏览器该用哪个地址由 web bundle 的 `webserver` 行、反向代理、SSH 隧道共同决定，只注入 `apiProxy` 的插件无从得知。写死一个 `127.0.0.1:3080` 默认值会让任何改了 bind 的运行**加载错误的页面**，那比没有地址更糟。
+`webUrl` 的唯一可信来源是**真正在监听的那个 socket**：`studio-surface` 通过 `ctx.inject(['webServer'])`（可选依赖，拿不到就不发布）读 `host`/`port`，其中 `port` 是 `listen` 之后的实际端口，因此 `--port 3081`、`port: 0`、3080 被占用这三种情况都能说对。
 
-文件在 `listen` 成功之后才写、插件卸载时删除：指向没人监听的端口的握手文件比没有文件更坏。
+反例记在这里，因为它真的发生过：profile 里写死 `shellUrl: http://127.0.0.1:3080`（web bundle 的**默认**端口），而 dogfood 把 runtime 起在 3081 —— 握手文件于是理直气壮地指向一个没人监听的端口，宿主 WKWebView 加载出一片空白，且**既不重试也不诊断**（地址存在就把两条兜底路径都关掉了）。教训：一个**猜出来的地址比没有地址更糟**；`0.0.0.0` 这类绑定通配符要翻译成 `127.0.0.1`（原生宿主与 runtime 必然同机），否则同样是个连不上的地址。
+
+`bridge.shellUrl` 因此只在「客户端到不了 carrier 自己的地址」时才配（反向代理、SSH 隧道、容器端口映射）—— 那是进程内部无法观测、只有部署者知道的事。**不要**为了「写清楚」把 carrier 的默认端口再抄一遍。
+
+文件在 `listen` 成功之后才写、插件卸载时删除：指向没人监听的端口的握手文件比没有文件更坏。`webUrl` 晚到（carrier 的 fiber 后激活）时**原地重写**这个文件，因为宿主每次重连与每 3s 的壳发现都会重读它。
 
 ### 2.2 面向原生的两类端点
 
 **(a) RPC 转发** — 原生端的领域调用不自己发明语义，直接转发到官方 apiproxy：
 
 ```
-POST /rpc   { "method": "session.prompt", "params": { … } }
+POST /rpc   { "type":"client-request", "rpcId":"…", "method": "session.prompt", "params": { … } }
 ```
+
+响应是上游 `toFetchHandler` 的**原样转发**，也就是官方信封，不是它的内层：
+
+```json
+{ "type": "server-response", "rpcId": "…", "result": { "ok": true, "value": { "items": [ … ] } } }
+```
+
+这一层写在这里，是因为它真的被漏读过（[known-gaps G-11](./known-gaps.md)）：原生端曾按 `{ ok, value }`（上游 `RpcResult` 的**内层**）解包，于是真机上把整个信封当业务值，`workspace.list` 永远缺 `items` —— 而测试替身编的恰好也是那个内层形状，200 个绿灯一致同意。**bridge 只转发、不重新包装**，`server-response` 这一层是必然的。
 
 `method` 取值域 = 官方 `RpcMethodMap`（`packages/host/apiproxy/src/api/rpc-map.ts`）。**我们不在这里加自己的方法**，加了就是在造一套影子 API，上游一改就全断。Studio 自己的少数需求（例如原生文件对话框结果回灌）走 `/studio/*` 前缀，与转发面严格分开。
 
-**(b) 事件流** — `GET /events`（SSE），转发 `session/event` 与必要的 `agent/*`：
+**(b) 事件流** — `GET /events`（SSE）。**四种** `event:` 名，取自 `bridge-server.ts` 实际发的东西（不是「协议里有什么」）：
 
-```
-event: session
-data: { "sessionId":"…", "seq":128, "event":{ … } }
-```
+| `event:` | data | 谁产生 |
+| --- | --- | --- |
+| `session` | `{ "sessionId":"…", "seq":128, "event":{ … } }` | 上游 mux 的 `session/event`，透传 |
+| `host` | `{ "type":"host/session-added" \| "host/session-status" \| "host/workspace-changed" \| … }` | 宿主级增量 |
+| `mux` | 上游 mux 里**除** `session/event` 之外的一切，按内层 `type` 再分派：`session/projection`（会话标题走这里）、`stream/error`… | 上游 mux，原样转发 |
+| `studio/replay-gap` | `{ "requestedSeq":…, "oldestSeq":… }` | bridge 自己：你要的 seq 出了保留窗口 |
+
+后两种曾经整体没建模，被原生端的 `.unknown` 兜底静默吞掉（[G-12](./known-gaps.md)）：结果是标题永不更新、`stream/error` 当没听见、replay-gap 也不重新基线 —— 一个不崩溃但持续撒谎的侧栏。**这张表以实现为准；改了 `bridge-server.ts` 就要改这张表。**
 
 语义对齐官方：**会话状态以 `session/event` 日志为准**。原生端只做投影缓存，不做第二份权威记录 —— 官方原则是 *Model-visible means logged*，能进模型请求的东西必须能从日志重建。
+
+⚠️ 但**列表读模型不能只靠增量重建**（[G-13](./known-gaps.md)）：`blank` 是 runtime 从会话事件日志折算的，host 流不广播它的翻转；工作区与会话的归属只写在 `workspace.list` 的 `sessionIds` 里，而新建会话**只发** `host/session-added`（真机抓流确认，没有 `host/workspace-changed`）。所以原生端把这些事件当**失效信号**：收到就重读 `workspace.list` / `session.list`，而不是就地推断。
 
 ### 2.3 断线与重放
 
 - SSE 断线：宿主用 `Last-Event-ID`（= `seq`）续传。
-- 长时间断开（超过 surface 侧保留窗口）：宿主放弃增量，重新 `session.history` 拉全量快照再续流。
-- 宿主必须能显示「与 runtime 失联」态。这是从 `codex/agent-sidebar` 分支继承的教训：断连横幅是第一个值得原生化的东西，因为 Web UI 断连时恰好也没法告诉你它断连了。
+- **每次连接与重连都重新拉一次全量**，续传也一样（`Last-Event-ID` 照旧带上，不丢事件）。理由见 §2.2 末尾：增量不足以重建列表，只续传的结果是一份越来越旧却自称 `live` 的列表。
+- 长时间断开（超过 surface 侧保留窗口）：宿主放弃增量，重新拉全量快照再续流。
+- 收到 `studio/replay-gap`：丢掉游标、重新基线（不是记一笔日志了事）。
+- 宿主必须能显示「与 runtime 失联」态，**并且**在保留旧数据时说明它可能已过期（`DataAvailability.stale`）。这是从 `codex/agent-sidebar` 分支继承的教训的延伸：断连横幅是第一个值得原生化的东西，因为 Web UI 断连时恰好也没法告诉你它断连了；而一份静止的旧列表，连「有点不对」的直觉都不给。
 
 ---
 

@@ -1,6 +1,10 @@
 # Known Gaps — 实现暴露的设计缺口
 
-W1 实现（`packages/studio-client`、`packages/studio-surface`、`apps/macos`）完成后，有八个缺口是**设计阶段没看出来、写代码才暴露**的。前三个（G-1 ~ G-3）是设计缺口，G-4 / G-5 是**两端联调时才暴露的契约分歧**，G-6 是**只在生产路径上炸、被 140 多个绿灯用例完整掩盖**的并发实现坑，G-7 是**两侧单测全绿却端到端全拒**的跨语言 wire 分歧，G-8 是**把插槽在官方 DOM 里的角色看错**导致的落位方式错误（视觉直接跑偏）。记在这里而不是埋在 commit message 里，因为它们会影响后续波次的取舍。
+W1 实现（`packages/studio-client`、`packages/studio-surface`、`apps/macos`）完成后，有十三个缺口是**设计阶段没看出来、写代码才暴露**的。前三个（G-1 ~ G-3）是设计缺口，G-4 / G-5 是**两端联调时才暴露的契约分歧**，G-6 是**只在生产路径上炸、被 140 多个绿灯用例完整掩盖**的并发实现坑，G-7 是**两侧单测全绿却端到端全拒**的跨语言 wire 分歧，G-8 是**把插槽在官方 DOM 里的角色看错**导致的落位方式错误（视觉直接跑偏），G-9 是**「失败必须可见」只做了控制通道一半**、数据通道上把失败画成了空态，G-10 是同一个毛病在 TS 侧的另一张脸 —— **把配置里的默认端口当成观测事实**写进握手文件。
+
+最后三个是**真机 dogfood 才逼出来的**，而且一条比一条更贴近「屏幕在骗人」这件事的本质：G-11 是**测试替身编造了一种真实 bridge 从不产生的 wire 形状**，于是 200 个绿灯掩盖了 100% 失效的真机；G-12 是**bridge 实际发的 SSE 事件名有一半没建模**，被 `.unknown` 无声吞掉；G-13 是**增量根本不足以重建那份列表**，于是快照只拉一次、事件不驱动刷新 —— 链路显示正常、列表却停在启动那一秒。
+
+记在这里而不是埋在 commit message 里，因为它们会影响后续波次的取舍。
 
 每一条都注明：现状怎么绕过的、什么时候必须真正解决、以及是否需要上游配合。
 
@@ -227,7 +231,85 @@ WebView 占满内容区，原生视图以**受控 overlay** 精确覆盖 Web 让
 
 ---
 
-## G-1 ~ G-3 的共同点
+## G-9 「失败必须可见」只做了控制通道那一半：数据通道把失败画成了空态 ✅ 已解决（三态读模型）
+
+**问题（本轮修的那个 bug）**
+原生侧栏的列表末尾只有两种画法 —— `.empty`（「暂无会话」）与 `.searchStatus`（「无匹配结果」）。于是数据通道的**任何**故障都落在第一种上：
+
+| 真实发生的事 | 用户看到的 |
+| --- | --- |
+| runtime 没起（`bridge.json` 不在） | 暂无会话 |
+| surface 进程被杀 / 端口没人应答 | 暂无会话 |
+| bridge token 失效（401） | 暂无会话 |
+| 上游把 `workspace.list` 的 `items` 改名（协议漂移） | 暂无会话 |
+| 用户真的还没建会话 | 暂无会话 ← **只有这一行是对的** |
+
+「暂无会话」是一句**关于用户数据的断言**，它只有在链路可信时才成立。把它画在一个「根本没拿到数据」的前提上，就是拿一句正确的话去骗人。
+
+**这比控制通道的同类问题更阴险**
+控制通道早就做了心跳 + 崩溃退位（G-3）：判死之后**整块**退回官方 Web UI，用户看到的是一个明显不同的界面。数据通道死了却只会安静地说「你没有会话」—— 界面看起来完全正常，用户下一步会去找自己的会话为什么不见了，而不是去看 runtime 是否还活着。
+
+**两个源头，都在「保守兜底」里**
+
+1. 视图层：空态判据是 `列表.isEmpty`，一个**只关于行数**的判断，回答不了「凭什么敢说空」；
+2. 数据层：快照解码写成 `try? … ?? WorkspaceListValue(items: [])`，于是协议漂移被翻译成「零个工作区」，而 `link` 还停在 `.live` —— **静默降级成空态**，正是失败不可见的教科书写法。
+
+**解决状态（W1）**
+
+- **判据搬出视图**：新增 `DataAvailability`（`RuntimeLink.swift`）四态读模型 —— `pending` / `unavailable(reason:retryable:)` / `empty` / `populated`，由 `DSHClient.dataAvailability` 纯函数算出。顺序是「有行 → populated；无行且失败 → unavailable；`.live` 且拿到过快照 → 才敢说 empty；否则 pending」。视图只 `switch`，自己不推理（W2 的下一个列表照抄这个 switch）。
+- **失败原因可诊断**：`DisconnectReason` 从 4 个 case 扩到 9 个，判据是**下一步不同才分家**（`remedy` 一栏）—— `runtimeNotRunning` / `surfaceUnreachable` / `unauthorized` / `insecureDescriptor` / `timedOut` / `protocolBroken` / `transport` / `streamEnded` / `cancelled`，每个带稳定的机器可读 `code`（日志与测试都用它，不 grep 中文文案）。
+- **解码不再宽容**：`WorkspaceListValue` / `SessionListValue` 的 `items` 必须存在，缺失就抛 → `.protocolBroken`。`archivedSessionIds` 这类**后加的可选字段**仍然容错（「没有归档」与「不知道有没有归档」在渲染上同义），宽容只用在这种地方。
+- **有节制的重试**：指数退避 + `maximumBackoff` 封顶 + `stabilityWindow`（一次连接活满 5s 才把退避计数归零，否则「连上就断」的 runtime 会让退避形同虚设），外加用户可点的手动重试 —— 这是 `unauthorized` 这类不可重试失败**唯一**的复活路径。
+- **UI 三态分开画**：失败态用既有 token（`errorPrimary` / `businessPrimary` / `labelTertiary` / `empty` / `meta`）+ 上游 `.empty` 的排版盒，说清是连接问题并给一颗重试；空态保留原样；「正在连接」自己是一态。列表已经画了失败态时**不再叠横幅**（同一句话说两遍反而更难读）。
+- 回归网：`DataChannelAvailabilityTests.swift`（21 条）+ 两条源码守卫（凡是写「暂无…」的视图必须 switch `dataAvailability`；`DSHKit`/`DSHClient` 不许用 `try? … ?? []` 把解码失败兜成空表）+ 离屏渲染的空/失败态 PNG 并排对照（`--render-slot-snapshots`）。
+
+**留下的规律（比修复本身更重要）**
+
+> **「失败必须可见」必须同时覆盖控制通道与数据通道，只做一半等于没做。**
+
+因为用户看的是**一块屏幕**，不是两条通道。控制通道做得再严，只要另一条通道能把故障渲染成一句正常的话，那块屏幕整体上仍然会骗人 —— 而且骗得更彻底：界面看起来完全健康，连「有点不对」的直觉都不给。
+
+推论有两条，已经反写进 [ARCHITECTURE.md §6](../ARCHITECTURE.md)：
+
+1. **每一条会渲染成「什么都没有」的路径，都必须能回答「我凭什么敢说没有」。** 空列表、空详情、零计数，都是关于数据的断言，前提是链路可信；判据要住在数据层的读模型里，而不是视图的 `isEmpty` 上。
+2. **`try? … ?? 空值` 是失败可见性的头号敌人。** 它把「读不懂」变成「没有」，而这两者在屏幕上恰好长得一样。宽容解码只允许用在**后加的可选字段**上，绝不允许用在列表主体上。
+
+---
+
+## G-10 `bridge.json` 的 `webUrl` 把配置默认端口当成观测事实 ✅ 已解决（问真正持有 socket 的那个服务）
+
+**问题**
+`profiles/studio/cordis.patch.yml` 里写着 `shellUrl: http://127.0.0.1:3080` —— web bundle 的**默认**端口，被当成事实抄了一遍。而 `scripts/dogfood.sh` 用 `--port 3081` 起 runtime。于是握手文件长这样：
+
+```json
+{ "port": 43180, "webUrl": "http://127.0.0.1:3080", "pid": 7176 }
+```
+
+数据通道走 43180，所以侧栏没炸；但 `webUrl` 指着一个**没人监听的端口**。宿主把它加载进 WKWebView 会得到一片空白，而且**既不重试也不诊断** —— 因为「地址存在」把两条兜底路径（重新发现 + 「runtime 未运行」提示）都关掉了。
+
+**为什么没人发现**
+`scripts/dogfood.sh` 自己 `export DSH_STUDIO_SHELL_URL=http://127.0.0.1:$PORT`，而环境变量在宿主侧**优先级更高**。也就是说：唯一有人真的去看的那次运行，恰好是这个错值伤不到人的那次运行。
+
+**根因不是打错字，是把「配置」当成了「观测」**
+`webUrl` 被建模成纯配置，理由写得也很像样：「浏览器该用哪个地址由 web bundle 的 `webserver` 行、反向代理、SSH 隧道共同决定，插件无从得知」。前半句错了 —— 进程内部**恰好**知道自己 bind 在哪：`webServer` 服务持有那个 socket，它的 `port` getter 报的是 `listen` 之后的实际端口（`port: 0` 时是 OS 分配的那个）。只有反代/隧道/容器映射才真的不可观测。
+
+**解决状态（W1）**
+
+- 新增 `packages/studio-surface/src/shell-url.ts`：`resolveShellUrl` —— **显式配置 > 实际监听的 carrier > 什么都不发**。函数体内不存在任何编译期默认端口。`0.0.0.0` / `::` 这类 bind 通配符翻译成 loopback（原生宿主与 runtime 必然同机），因为通配符不是一个可连接的地址。
+- `webServer` 通过 `ctx.inject(['webServer'], …)` 取（上游对**可选**依赖的写法），**不是** `export const inject`：数据通道不许等 Web 壳（ADR-0002），没有浏览器载体的组合（Electron 走 `file://`）照样要有侧栏。
+- 插件体搬到 `plugin.ts` 并把 gateway 适配器变成参数，于是「发布哪个地址、什么时候发布」这件事**可从测试到达**（`index.ts` 仍是唯一 import 上游的组装根）。carrier 早到 / 晚到都能得到一份正确的文件（晚到就**原地重写** `bridge.json`，宿主每次重连与每 3s 的壳发现都会重读它）。
+- profile 里的 `shellUrl` 删掉，并留注释说明「只在客户端到不了 carrier 自己的地址时才配」；`scripts/dogfood.sh` 不再 export `DSH_STUDIO_SHELL_URL`，让分歧可见。
+- 用例：`shell-url.test.ts`（7 条，含「任何输入都不许算出 3080」）+ `handshake.test.ts`（5 条，钉住 wiring：不等 carrier、早到/晚到、显式配置胜出、卸载后晚到的 carrier 不许把文件复活）+ `profile.test.ts` 一条源码守卫（profile 不许再写 `shellUrl`）。
+- 剩下一处**已知的检查不到**：`AssertHostContextFits` 对 `webServer` 是空判（可选成员 + 提供方不在本程序里），所以上游改名不会变成编译错误。补偿是这条降级**在运行期可见**：`inject` 不触发 → 不发 `webUrl` → 宿主打印「bridge.json 里没有 webUrl」并继续重新发现，而不是加载一个错页面。理由写在 `host-context.ts` 头部。
+
+**留下的规律**
+
+> **一个猜出来的地址比没有地址更糟。** 缺失会触发兜底与诊断，错值会把两者都关掉。
+
+以及它与 G-9 是**同一条**规律的两张脸：G-9 是「没拿到数据却说没有数据」，G-10 是「没观测到端口却说端口是几」。都是**在没有依据的地方给出一个自信的答案**，而两次的正确做法都一样 —— 问真正知道的那一方，没人知道就闭嘴，并让「闭嘴」这件事可见。
+
+---
+
 
 它们都指向同一个判断偏差：**我在设计时把 overlay 和「父原生 / 子 Web」这类混合形态想得太可行了。**
 
@@ -245,6 +327,136 @@ WebView 占满内容区，原生视图以**受控 overlay** 精确覆盖 Web 让
 
 ---
 
+## G-11 测试替身编造了一种真实 bridge 从不产生的 wire 形状 → 200 个绿灯掩盖了 100% 失效的真机 ✅ 已解决（替身必须说线上那句话）
+
+**问题**
+真机一启动，侧栏就是一句红字：
+
+```
+data channel down [protocol-broken] workspace.list: keyNotFound "items"
+```
+
+而 `swift test` 是 200 个绿灯。两边都「对」，因为它们在读**两种不同的协议**：
+
+| | `/rpc` 响应体 |
+| --- | --- |
+| `FakeTransport`（测试替身编的） | `{ "ok": true, "value": { "items": [...] } }` |
+| 真实 bridge（逐字转发上游 `toFetchHandler`） | `{ "type": "server-response", "rpcId": "…", "result": { "ok": true, "value": { "items": [...] } } }` |
+
+`RPCReply.unwrap` 按替身那份写的，于是真机上它把**整个信封**当成了业务值，`WorkspaceListValue` 自然找不到 `items`。
+
+**为什么 G-9 的修复反而让它更响**
+G-9 刚把「解不开就抛」立成规矩（不许 `try? … ?? []`）。所以这次漂移没有被静默降级成空态，而是硬邦邦地报了 `protocol-broken` —— 这是**修复起作用**的证据：同样的错，在 G-9 之前会表现为「暂无会话」，只会让人以为自己没建会话。
+
+**根因不是打错字，是替身没有权威来源**
+`{ok,value}` 是**上游 `RpcResult` 的内层**，被当成了整个响应体。而 bridge 的 `handleRpc` 只做转发，它不重新包装 —— 也就是说，`server-response` 那一层是 `/rpc` 的**必然**形状，不是可选的。测试替身自己「编」了一个更省事的形状，从此测试与真机就再没交集：**测试测的是替身，不是协议。**
+
+**解决状态（W1）**
+
+- `RPCReply.unwrap` 认三种输入：官方 `server-response` / `client-response` 信封、裸 `{ok,value|error}`（上游内层，仍可能被别的转发面直出）、以及**其余一切 → 抛 `EnvelopeError`**。原来那条「不认识就把它当业务值返回」的兜底删掉了：它正是让整包信封蒙混过关的那一行。
+- `EnvelopeError` 归类为 `.protocolBroken` → 侧栏画失败态、日志给出机器可读 code。读不懂信封是**故障**，不是数据。
+- `FakeTransport.post` 默认回 `FakeTransport.envelope(_:)`（真 `server-response`）；想测信封本身的用例走 `setRawReplyBody`，**不许**各测试自己编包装。
+- 离屏渲染的 `FixtureTransport` 同样改成真信封 —— 截图夹具和线上 wire 脱钩，等于让 PNG 也开始撒谎。
+- 用例：`DomainModelTests` 里四条信封解包（官方信封 / 裸 result / `ok:false` / 未知形状必须抛）+ `DataChannelAvailabilityTests` 里「真机信封能走到 populated」「未知信封是 protocol-broken 而不是空态」。
+
+**留下的规律**
+
+> **测试替身是一份协议实现，它必须有权威来源；替身编出来的形状，测试再多也只是自证。**
+
+判据很具体：替身回的每一个字段，都要能在**上游 schema 或真机抓包**里指出出处。做不到就说明这条测试在测自己想象出来的系统 —— 而 G-9 的教训（宽容解码把故障变成空态）之所以能在真机上被立刻发现，恰恰是因为这次没有第二个「善解人意」的兜底。
+
+---
+
+## G-12 bridge 实际发的 SSE 事件名有一半没建模，被 `.unknown` 静默吞掉 ✅ 已解决（按 bridge 真发的东西建模）
+
+**问题**
+`bridge-contract.md §2.2` 只写了 `event: session`。而 `bridge-server.ts` 真发的是四种：
+
+| SSE `event:` | 内容 | 原来的下场 |
+| --- | --- | --- |
+| `session` | 上游 `session/event` | ✅ 已建模 |
+| `host` | 宿主级增量 | ✅ 已建模 |
+| `mux` | 上游 mux 里**除** `session/event` 之外的一切 —— `session/projection`、`stream/error`… | ❌ 落进 `.unknown` |
+| `studio/replay-gap` | 「你要的 seq 出了保留窗口」 | ❌ 落进 `.unknown` |
+
+后果都不是崩溃，而是更坏的东西：会话**标题永远不随实时事件更新**（它走 `session/projection`）；上游明说 `stream/error` 我们当没听见；bridge 明说「你漏事件了，去重新基线」我们继续贴着旧数据宣称 `.live`。
+
+**为什么文档骗了人**
+契约文档写的是「协议里有什么」，代码读的是「实现发了什么」。这两份东西一旦不同，**实现赢** —— 而 `.unknown` 兜底让这个分歧完全无声：`unknownFrames` 里默默堆了一串名字，没有任何一处 UI 或断言会因此变红。
+
+**解决状态（W1）**
+
+- `StreamFrame.decode` 按 bridge 的真名分派，`mux` 再按内层 `type` 二次分派：`session/projection` → `.projection`、`stream/error` → `.streamError`、其余 → `.unknown("mux:<type>")`（仍然记账，但名字里带得出是哪一种）。
+- `studio/replay-gap` → `.replayGap(requested:oldest:)`：**丢掉游标 + 重拉全量**。增量有洞时唯一诚实的动作是重新基线，而不是带着洞继续 live。
+- `stream/error` → 抛 `.streamFaulted` 走退避重连，不再记进 `unknownFrames` 了事。
+- 用例：三条 wire 级解码（`mux/session-projection`、`mux/stream-error`、`studio/replay-gap` 必须被认出）+ 三条行为级（replay-gap 触发重新基线、stream/error 显式失败、mux 投影真的更新标题）。
+
+**留下的规律**
+
+> **要建模的是「对端实际发什么」，不是「文档说协议有什么」。** 契约文档是意图，`bridge-server.ts` 才是事实；两者不一致时，先按事实建模，再回头修文档。
+
+以及：`.unknown` 兜底是**必要**的（上游是 developer preview，多一种 frame 不该让侧栏停摆），但它是**记账**，不是**处理**。凡是「记账之后什么都不做」的分支，都要能回答一句：如果这一类恰好很重要，我们靠什么发现？
+
+---
+
+## G-13 增量根本不足以重建那份列表，于是快照只拉一次、事件不驱动刷新 ✅ 已解决（事件是失效信号，全量才是真值）
+
+**问题（用户报的第二个 bug）**
+链路显示正常，侧栏却始终「暂无会话」。而同一时刻用 bridge token 直接打 RPC，runtime 答得清清楚楚：
+
+```
+session.list   → 18 个会话，其中 1 个 blank=false、title="123"、asOfSeq=17
+workspace.list → Workspace 的 sessionIds 里含那个非空会话，archived=0
+```
+
+也就是说：**该显示的那一行，数据早就在 runtime 里了，只是原生侧栏手上那份快照是启动那一刻的。** 全量只在连上时拉一次，之后完全靠增量；而增量**恰好缺**决定「谁该显示」的两个事实：
+
+1. `blank` 是上游从会话事件日志折算出来的读模型（`turn/start` 之后才变 false），host 流里**没有任何** frame 宣告它翻转；
+2. 会话属于哪个工作区只写在 `workspace.list` 的 `sessionIds` 里 —— 真机抓流确认，新建会话只广播 `host/session-added`，**不发** `host/workspace-changed`。
+
+于是那一行永远进不了列表：`workspace.sessionIds` 里没有它，`blank` 也还是 true。
+
+**这和「把失败画成空态」是同一种病**
+G-9 修的是「没拿到数据却说没有数据」。这次是「拿到过数据，之后再也没更新，却继续把它当现状」。屏幕上同样是一句无法保证的断言，而且**更难发现**：界面不仅正常，还「有内容」，只是内容停在了过去某一秒。
+
+**解决状态（W1）**
+
+- **每次连接与重连都重新拉全量**，续传照样拉（`Last-Event-ID` 仍然带上，不丢事件）。省下的那两个 loopback RPC，换来的是一份可能永久错误的列表 —— 不值。
+- **事件降级为「列表失效信号」**：`host/*`（含没建模的类型）、`turn/start`、`userMessage`、`replay-gap`、**解析失败的帧**，都只表示「有事发生」，具体新值一律回头问 `workspace.list` / `session.list`。一个 chunk 里的多帧**合并成一次**刷新（新建会话一次来 5~6 帧，不该打 5 遍 RPC）。
+- **`agent-error` 不触发刷新**：它只改横幅文案，不改列表成员 —— 失效判定要精确到「哪些事实变了」，否则退化成对着 loopback 轮询。
+- **全量与增量的对齐规则按字段定权威**（`reconcile(row:)`），依据是上游各字段的**来源**：`running` 读的是 `agent.status`（请求那一刻的活进程状态）→ 无条件听全量；成员关系只有全量有 → 只认全量；`blank` 与投影是事件日志折算的、行里带 `projections.asOfSeq` → 和我们应用到的 seq 比，**高者胜**。少了这条规则，全量会把刚从 `session/projection` 收到的标题擦掉（表现为「标题闪一下就没了」）。
+- **过期不再冒充现状**：`DataAvailability` 增加 `.stale(reason:retryable:)`。有行 + 链路不在 live → 保留行（清空是另一种撒谎）**并且**在列表末尾明说「以上是最后一次同步的结果，可能已过期」。`isCurrent` 只有 `populated` / `empty` 为真。
+- 用例（`DataChannelAvailabilityTests`，全部走真 SSE 文本 + 真信封）：会话变更事件 → 重拉快照 → 新行出现；一个 chunk 多帧只重读一次；解析不了的帧留痕并兜全量；未建模的 host frame 也触发重读；流断开 → `.stale` 且 `isCurrent == false`；SSE 重连成功 → 重新对齐全量；真实数据 fixture（15 个 sessionIds / 14 blank / 1 个 title="123"）→ 侧栏**恰好**一行 `123`。
+
+**真机端到端复现与验证（2026-08-18，日志见 `g13-verified.log`）**
+
+用户报的那一幕被完整重演了一遍：全新的 `DSH_HOME`（零会话）+ runtime `127.0.0.1:3082`，app 起来时确实是**空**，然后在 **app 运行期间**用 bridge token 造出一个非空会话（`session.create` → `session.prompt "123"`，`blank` 由 true 翻成 false、`title=123`、`asOfSeq=16`）。原生栏自己刷出来了：
+
+```
+02:10:02  snapshot #1: 0 workspace(s), 0 session(s), 0 displayable
+02:10:02  availability pending → empty (link=live, displayable=0, snapshots=1)
+02:10:20  host/session-added → re-reading the snapshot
+02:10:20  snapshot #4: 0 workspace(s), 1 session(s), 0 displayable   ← 还是 blank，正确地不显示
+02:10:48  host/session-status → re-reading the snapshot
+02:10:48  snapshot #5: 0 workspace(s), 1 session(s), 1 displayable
+02:10:48  availability … → populated (link=live, displayable=1, snapshots=5)
+```
+
+`empty → populated` 全程没有重启 app，也没有人点重试。中间那两拍（`session-added` 之后仍是 0 displayable）恰好是 `blank` 过滤在起作用的证据：会话建出来但还没说话就**不该**显示 —— 这与官方 UI 一致。
+
+为了让「界面这一刻画的是哪一态」不必靠人对着屏幕转述，`DataAvailability` / `RuntimeLinkState` 各加了一个稳定的 `label`，`DSHClient` 只在**变化时**记一行 `availability A → B (link=…, displayable=…, snapshots=…)`。
+
+**留下的规律**
+
+> **「失败可见」不止于「连不上要说出来」，还包括「数据过期不能装作现状」。**
+
+一份静止的正确数据和一份实时数据在屏幕上长得一模一样，这正是它危险的地方。两条可操作的推论：
+
+1. **增量只有在「足以重建读模型」时才能当真值。** 判据是逐字段问：这个字段的值，能否**只**从事件流推出来？答不上来（`blank`、工作区归属就答不上来）的，事件就只能当失效信号，全量才是真相。
+2. **每一处「上次成功读到的数据」都要带上时效性。** 保留旧数据是对的，把旧数据说成现状不是；两者的差别只有一句话的成本。
+
+---
+
 ## 待办
 
 - [x] G-3：加 `surface/ping`/`pong` 与运行期失联降级（**W1 上线前**）—— 宿主发起、client 半回答，两端已实现并有测试
@@ -256,4 +468,12 @@ WebView 占满内容区，原生视图以**受控 overlay** 精确覆盖 Web 让
 - [x] G-5：把「渲染语义」与「启动期必须有实现」分开 —— `retired.mountsNativeView` 保持 `true`，暗槽不要求原生实现（`slotsRequiringNativeView`）
 - [x] G-6：时钟缝的默认值改成命名常量，并加运行时回归 + 源码守卫
 - [x] G-7：空 `keys`/`ids` 不上线（自定义 `encode(to:)`），并用 `contracts/` 下两侧共读的 wire golden 钉住
+- [x] G-9：数据通道的失败必须可见 —— `DataAvailability` 三态读模型、9 类可诊断失败原因、严格解码、退避 + 手动重试、侧栏三态分开画，并用两条源码守卫防复发
+- [x] G-10：`webUrl` 改由 `webServer` 服务的实际监听端口推导（`shell-url.ts`），profile 与 dogfood 脚本都不再写死地址
+- [ ] G-10 遗留：`AssertHostContextFits` 对 `webServer` 是空判（提供方不在本程序里）。上游若改名，只能靠运行期「没有 webUrl」的日志发现。要变成编译错误，得把 `@deepseek-ai/dsh-host-webserver` 加成 devDependency —— 为两个标量拉一整个 HTTP 载体，等 W2 再权衡
+- [x] G-11：`/rpc` 按官方 `server-response` 信封解包，读不懂信封 → `protocol-broken`；测试替身与截图夹具一律回真信封（`FakeTransport.envelope`）
+- [x] G-12：按 bridge 真发的 SSE 名建模 —— `mux` 二次分派（`session/projection` / `stream/error`）、`studio/replay-gap` 重新基线
+- [x] G-13：事件驱动刷新 —— 每次（重）连都对齐全量、事件降级为失效信号并在 chunk 内合并、全量与增量按字段定权威（`reconcile(row:)`）、新增 `.stale` 让过期数据不冒充现状
+- [ ] G-13 遗留：失效信号目前是「相关事件 → 重读整份 `workspace.list` + `session.list`」。会话数量级还小（真机 18 个）时够用；上游若给出「blank 翻转」或「工作区成员变更」的显式增量，这里应当收窄成增量合并，别把 loopback 全量当长期方案
+- [ ] G-13 遗留：事件驱动的那次全量刷新途中链路是 `.resyncing`，于是 `dataAvailability` 会短暂落到 `.stale`（真机实测 25~55ms，日志里看得见 `populated → stale(reconnecting) → populated`）。屏幕上看不出来，但语义上「正在刷新」和「链路断了」并不是一回事，应当区分开（例如给 `.resyncing` 带上「是否有活着的流」）
 - [x] TS 侧 dogfood 前置条件：`lib/` 真实产物、`profiles/studio` profile、`bridge.json` 的 `host` / `webUrl` 字段（宿主靠它找官方壳，否则只能靠 `DSH_STUDIO_SHELL_URL` 环境变量兜底）

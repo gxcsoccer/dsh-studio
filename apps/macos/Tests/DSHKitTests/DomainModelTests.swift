@@ -84,6 +84,54 @@ struct DomainUnionTests {
         #expect(view.sessionIds == [SessionID("s-1")])
     }
 
+    @Test("bridge 真实发的 event 名都被听见：mux / studio/replay-gap（G-12）")
+    func hearsWhatTheBridgeActuallySends() {
+        // bridge 把 mux 的非 session/event 帧命名为 `mux` 并原样转发，
+        // 投影就在里面 —— 曾经整包掉进 .unknown，于是标题永不更新。
+        guard case .projection(let projection) = StreamFrame.decode(eventName: "mux", data: .object([
+            "type": .string("session/projection"),
+            "sessionId": .string("s-1"),
+            "key": .string("title"),
+            "value": .string("重命名之后的标题"),
+            "seq": .number(42),
+        ])) else {
+            Issue.record("mux 里的 session/projection 必须被解出来")
+            return
+        }
+        #expect(projection.key == "title")
+        #expect(projection.seq == 42)
+
+        // 上游明说流坏了：必须是失败，不是 unknown。
+        guard case .streamError(let fault) = StreamFrame.decode(eventName: "mux", data: .object([
+            "type": .string("stream/error"),
+            "error": .object(["code": .string("internal"), "message": .string("boom")]),
+        ])) else {
+            Issue.record("stream/error 必须解成 streamError")
+            return
+        }
+        #expect(fault.code == "internal")
+
+        // bridge 明说增量有洞 → 必须解成 replayGap，让客户端重新基线。
+        guard case .replayGap(let requested, let oldest) = StreamFrame.decode(
+            eventName: "studio/replay-gap",
+            data: .object(["requested": .number(37), "oldest": .number(120), "retention": .number(512)])
+        ) else {
+            Issue.record("studio/replay-gap 必须被听见")
+            return
+        }
+        #expect(requested == 37)
+        #expect(oldest == 120)
+
+        // mux 里我们不建模的家族仍然记账降级，但名字要带出内层 type 便于排查。
+        guard case .unknown(let name, _) = StreamFrame.decode(eventName: "mux", data: .object([
+            "type": .string("approval/requested"), "sessionId": .string("s-1"),
+        ])) else {
+            Issue.record("expected unknown")
+            return
+        }
+        #expect(name == "mux:approval/requested")
+    }
+
     @Test("未知 SSE event 名不丢弃、不崩")
     func unknownStreamFrameName() {
         let frame = StreamFrame.decode(eventName: "telemetry", data: .object(["a": .number(1)]))
@@ -142,6 +190,27 @@ struct DomainUnionTests {
         #expect(value.archivedSessionIds.isEmpty)
     }
 
+    @Test("workspace.list 缺 items 必须抛错——不许把上游漂移解成「零个工作区」")
+    func workspaceListRejectsMissingItems() throws {
+        // 上游把 `items` 改名成 `workspaces`（或多包一层）时的样子。
+        // 曾经这里 `decodeIfPresent ?? []`，于是协议漂移与「你真的没有工作区」
+        // 长得一模一样，侧栏理直气壮地写「暂无会话」。宽容解码在**列表主体**上
+        // 就是静默降级。
+        #expect(throws: (any Error).self) {
+            _ = try JSONValue.object(["workspaces": .array([])]).decoded(as: WorkspaceListValue.self)
+        }
+        #expect(throws: (any Error).self) {
+            _ = try JSONValue.object([:]).decoded(as: WorkspaceListValue.self)
+        }
+    }
+
+    @Test("session.list 缺 items 同样抛错")
+    func sessionListRejectsMissingItems() throws {
+        #expect(throws: (any Error).self) {
+            _ = try JSONValue.object(["sessions": .array([])]).decoded(as: SessionListValue.self)
+        }
+    }
+
     @Test("投影表是开放集合：未知 key 原样保留")
     func projectionsKeepUnknownKeys() throws {
         let block = try JSONValue.object([
@@ -171,19 +240,71 @@ struct RPCTests {
         #expect(RPCMethod.workspaceArchiveSession.rawValue == "workspace.archiveSession")
     }
 
-    @Test("响应解包：{ok,value} / {ok:false,error} / 裸值")
-    func unwrapsReplies() throws {
+    @Test("响应解包：官方 server-response 信封是线上唯一形状")
+    func unwrapsOfficialEnvelope() throws {
+        // 逐字取自真机 `POST /rpc {"method":"workspace.list"}` 的回答。
+        let live = try JSONValue.decode(Data("""
+        {"type":"server-response","rpcId":"84ebdbd1-aa94-456c-985b-cff19a71b681",
+         "result":{"ok":true,"value":{"items":[{"workspaceId":"f42ee878","path":"/Users/bytedance/Workspace",
+         "title":"Workspace","sessionIds":["session-d7beff90"],"createdAt":"","updatedAt":""}],
+         "archivedSessionIds":[]}}}
+        """.utf8))
+        let value = try RPCReply.unwrap(live)
+        // 解包结果必须是**业务值**，不是信封：这正是 G-11 当年错的地方。
+        #expect(value["items"]?.arrayValue?.count == 1)
+        #expect(value["type"] == nil)
+        let list = try value.decoded(as: WorkspaceListValue.self)
+        #expect(list.items.first?.path == "/Users/bytedance/Workspace")
+    }
+
+    @Test("响应解包：裸 result 本体 / ok:false 业务错误")
+    func unwrapsResultBody() throws {
         let wrapped = try RPCReply.unwrap(.object(["ok": .bool(true), "value": .object(["items": .array([])])]))
         #expect(wrapped["items"]?.arrayValue?.isEmpty == true)
 
-        let bare = try RPCReply.unwrap(.object(["items": .array([])]))
-        #expect(bare["items"] != nil)
+        // void 业务结果：信封里根本没有 value（上游明写）→ 空对象。
+        let void = try RPCReply.unwrap(.object([
+            "type": .string("server-response"),
+            "rpcId": .string("x"),
+            "result": .object(["ok": .bool(true)]),
+        ]))
+        #expect(void == .object([:]))
 
         #expect(throws: RPCFault(code: "not_found", message: "no such session")) {
             try RPCReply.unwrap(.object([
-                "ok": .bool(false),
-                "error": .object(["code": .string("not_found"), "message": .string("no such session")]),
+                "type": .string("server-response"),
+                "rpcId": .string("x"),
+                "result": .object([
+                    "ok": .bool(false),
+                    "error": .object(["code": .string("not_found"), "message": .string("no such session")]),
+                ]),
             ]))
+        }
+    }
+
+    @Test("响应解包：读不懂的形状必须抛 EnvelopeError，绝不当作业务值放行（G-11）")
+    func refusesToGuess() throws {
+        // 裸值兜底是这个 bug 的载体：`{items:…}` 没有 ok/type，说明我们对
+        // 这条响应的结构一无所知，放行等于让上层拿信封当数据。
+        #expect(throws: RPCReply.EnvelopeError.self) {
+            try RPCReply.unwrap(.object(["items": .array([])]))
+        }
+        // 信封在，但 result 缺失/形状不对。
+        #expect(throws: RPCReply.EnvelopeError.self) {
+            try RPCReply.unwrap(.object(["type": .string("server-response"), "rpcId": .string("x")]))
+        }
+        #expect(throws: RPCReply.EnvelopeError.self) {
+            try RPCReply.unwrap(.object([
+                "type": .string("server-response"), "rpcId": .string("x"),
+                "result": .object(["value": .object([:])]),
+            ]))
+        }
+        // 换了一种 type：也许是别的信封，反正不是我们认识的。
+        #expect(throws: RPCReply.EnvelopeError.self) {
+            try RPCReply.unwrap(.object(["type": .string("server-request"), "result": .object(["ok": .bool(true)])]))
+        }
+        #expect(throws: RPCReply.EnvelopeError.self) {
+            try RPCReply.unwrap(.array([]))
         }
     }
 

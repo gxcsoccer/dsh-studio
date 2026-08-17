@@ -116,16 +116,21 @@ export interface BridgeConfig {
    */
   tokenFile: string
   /**
-   * URL of the official Web shell, published to the native half as the
-   * handshake's `webUrl` (bridge-contract.md §2.1).
+   * **Override** for the URL of the official Web shell, published to the native
+   * half as the handshake's `webUrl` (bridge-contract.md §2.1).
    *
-   * It is configuration rather than something this plugin derives, and that is
-   * a deliberate boundary: the address the browser must use is decided by the
-   * web bundle's own rows (`webserver` host/port, a reverse proxy in front of
-   * them, an SSH tunnel), and none of that is knowable from inside a plugin
-   * that only injects `apiProxy`. Empty (the default) publishes no `webUrl` at
-   * all — the honest answer, which the native half reports as "no shell
-   * address yet" instead of loading a wrong page.
+   * Empty (the default) does *not* mean "publish nothing": the plugin then asks
+   * the `webServer` service what it is actually listening on and publishes that
+   * (`shell-url.ts`). Configure this only when the address a client must use is
+   * not the address the carrier bound — a reverse proxy, an SSH tunnel, a
+   * container port mapping — because that is the one thing no local observation
+   * can discover. It wins over the observed value.
+   *
+   * ⚠️ Do **not** restate the carrier's default port here "for clarity". The
+   * previous value (`http://127.0.0.1:3080`) was exactly that, and it silently
+   * lied on every `dsh --port …` launch — a handshake pointing at a dead port
+   * costs more than an absent field, because the native half stops both
+   * retrying and diagnosing.
    */
   shellUrl: string
 }
