@@ -127,15 +127,14 @@ struct NativeSlotHostTests {
         try host.handle(mountEvent())
 
         #expect(throws: SurfaceError.overlayInsideScrollContainer(slot: W1.workspacesSlot, instanceID: "inst-1")) {
-            try host.handle(.rect(
-                instanceID: "inst-1",
+            try host.handle(.rect(instanceID: "inst-1", geometry: SlotGeometry(
                 rect: SlotRect(x: 0, y: 0, w: 260, h: 700),
                 scrollable: true
-            ))
+            )))
         }
         #expect(telemetry.rejections.count == 1)
         // 被拒之后不许留下一个「差不多对」的几何。
-        #expect(host.stage.mounted["inst-1"]?.frame == nil)
+        #expect(host.stage.mounted["inst-1"]?.geometry == nil)
     }
 
     @Test("overlay + 非滚动容器：几何被采纳")
@@ -145,16 +144,49 @@ struct NativeSlotHostTests {
         ])
         let (host, _, _) = makeHost(manifest: manifest)
         try host.handle(mountEvent())
-        try host.handle(.rect(instanceID: "inst-1", rect: SlotRect(x: 4, y: 8, w: 260, h: 700), scrollable: false))
-        #expect(host.stage.mounted["inst-1"]?.frame == CGRect(x: 4, y: 8, width: 260, height: 700))
+        try host.handle(.rect(instanceID: "inst-1", geometry: SlotGeometry(
+            rect: SlotRect(x: 4, y: 8, w: 260, h: 700),
+            clip: SlotRect(x: 0, y: 0, w: 1_440, h: 900),
+            viewport: SlotSize(w: 1_440, h: 900)
+        )))
+        // 舞台存的是**原样**的 CSS 几何：换算成 point 是 `NativeSlotLayer` 的活，
+        // 它才知道 WebView 的点尺寸。舞台猜一个尺寸就等于埋一个漂移源。
+        let geometry = try #require(host.stage.mounted["inst-1"]?.geometry)
+        #expect(geometry.rect == SlotRect(x: 4, y: 8, w: 260, h: 700))
+        #expect(geometry.viewport == SlotSize(w: 1_440, h: 900))
+        #expect(geometry.occluded == false)
+    }
+
+    @Test("裁剪祖先（overflow: hidden）不等于滚动容器：几何照收，裁剪由 clip 表达")
+    func acceptsClippingButNonScrollingAncestor() throws {
+        // W1 的目标插槽正好住在官方侧栏 `.regionArea`（`overflow: hidden`）里。
+        // 把「裁剪」和「滚动」当成同一个 bit，就只剩两个错答案可选：按 ADR-0003
+        // 拒掉这个 cell（原生栏永不出现），或者让原生视图在折叠动画里溢出到
+        // 会话区上面（known-gaps.md G-1）。
+        let manifest = SurfaceManifest(slots: [
+            W1.workspacesSlot: SlotEntry(mode: .native, placement: .overlay),
+        ])
+        let (host, telemetry, _) = makeHost(manifest: manifest)
+        try host.handle(mountEvent())
+        try host.handle(.rect(instanceID: "inst-1", geometry: SlotGeometry(
+            rect: SlotRect(x: 0, y: 52, w: 260, h: 800),
+            clip: SlotRect(x: 0, y: 52, w: 260, h: 500), // 祖先把下半截裁掉
+            viewport: SlotSize(w: 1_440, h: 900),
+            scrollable: false
+        )))
+        #expect(telemetry.rejections.isEmpty)
+        #expect(host.stage.mounted["inst-1"]?.geometry?.clip == SlotRect(x: 0, y: 52, w: 260, h: 500))
     }
 
     @Test("evacuated 插槽上报几何是协议违规")
     func rejectsGeometryForEvacuatedSlot() throws {
-        let (host, telemetry, _) = makeHost() // w1Default = evacuated
+        let manifest = SurfaceManifest(slots: [
+            W1.workspacesSlot: SlotEntry(mode: .native, placement: .evacuated),
+        ])
+        let (host, telemetry, _) = makeHost(manifest: manifest)
         try host.handle(mountEvent())
         #expect(throws: SurfaceError.geometryForEvacuatedPlacement(slot: W1.workspacesSlot, instanceID: "inst-1")) {
-            try host.handle(.rect(instanceID: "inst-1", rect: SlotRect(x: 0, y: 0, w: 1, h: 1), scrollable: false))
+            try host.handle(.rect(instanceID: "inst-1", geometry: SlotGeometry(rect: SlotRect(x: 0, y: 0, w: 1, h: 1))))
         }
         #expect(telemetry.rejections.count == 1)
     }
@@ -204,7 +236,7 @@ struct NativeSlotHostTests {
 
         try host.handle(.props(instanceID: "inst-1", patch: ["collapsed": .bool(true)]))
         try host.handle(.unmount(instanceID: "inst-1"))
-        try host.handle(.rect(instanceID: "inst-1", rect: SlotRect(x: 0, y: 0, w: 1, h: 1), scrollable: false))
+        try host.handle(.rect(instanceID: "inst-1", geometry: SlotGeometry(rect: SlotRect(x: 0, y: 0, w: 1, h: 1))))
         #expect(host.droppedOrchestrationCount == 3)
     }
 

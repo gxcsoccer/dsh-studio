@@ -79,6 +79,65 @@ struct SurfaceEventDecoderTests {
         #expect(SlotRect(x: 12, y: 40, w: 260, h: 800).isSane)
     }
 
+    @Test("slot/rect 解出完整几何：clip / viewport / occluded / dpr（G-1）")
+    func decodesFullGeometry() throws {
+        let event = try SurfaceEventDecoder.decode(method: ControlMethod.slotRect, payload: .object([
+            "instanceId": .string("inst-1"),
+            "rect": .object(["x": 0, "y": 52, "w": 260, "h": 848]),
+            "clip": .object(["x": 0, "y": 52, "w": 260, "h": 500]),
+            "viewport": .object(["w": 1_440, "h": 900]),
+            "scrollable": .bool(false),
+            "occluded": .bool(true),
+            "dpr": .number(2),
+        ]))
+        guard case .rect(let instanceID, let geometry) = event else {
+            Issue.record("expected rect event")
+            return
+        }
+        #expect(instanceID == "inst-1")
+        #expect(geometry.clip == SlotRect(x: 0, y: 52, w: 260, h: 500))
+        #expect(geometry.viewport == SlotSize(w: 1_440, h: 900))
+        #expect(geometry.occluded)
+        #expect(geometry.devicePixelRatio == 2)
+    }
+
+    @Test("旧 client 半只发 rect + scrollable 时，兜底方向是「保持可见」")
+    func toleratesGeometryWithoutClip() throws {
+        let event = try SurfaceEventDecoder.decode(method: ControlMethod.slotRect, payload: .object([
+            "instanceId": .string("inst-1"),
+            "rect": .object(["x": 0, "y": 0, "w": 260, "h": 800]),
+            "scrollable": .bool(false),
+        ]))
+        guard case .rect(_, let geometry) = event else {
+            Issue.record("expected rect event")
+            return
+        }
+        // 缺 clip ≠ 全裁掉：那会让原生视图消失，比不裁更糟。
+        #expect(geometry.clip == geometry.rect)
+        #expect(geometry.viewport == nil)
+        #expect(geometry.occluded == false)
+    }
+
+    @Test("clip / viewport 形状不对时拒绝，不「取能取到的部分」")
+    func rejectsMalformedClip() {
+        #expect(throws: BridgeFault.self) {
+            try SurfaceEventDecoder.decode(method: ControlMethod.slotRect, payload: .object([
+                "instanceId": .string("inst-1"),
+                "rect": .object(["x": 0, "y": 0, "w": 260, "h": 800]),
+                "clip": .string("everything"),
+                "scrollable": .bool(false),
+            ]))
+        }
+        #expect(throws: BridgeFault.self) {
+            try SurfaceEventDecoder.decode(method: ControlMethod.slotRect, payload: .object([
+                "instanceId": .string("inst-1"),
+                "rect": .object(["x": 0, "y": 0, "w": 260, "h": 800]),
+                "viewport": .object(["w": .number(.nan), "h": 900]),
+                "scrollable": .bool(false),
+            ]))
+        }
+    }
+
     @Test("props 键数 / 深度 / 键名越界被拒绝")
     func rejectsAbusiveProps() {
         var wide: [String: JSONValue] = [:]
@@ -187,8 +246,20 @@ struct SurfaceManifestTests {
         #expect(SurfaceManifest.w1Default.entry(for: W1.workspacesDirectoryFlowSlot).mode == .retired)
         // 遮蔽父 `sidebar` 就得继承它三个子插槽的声明责任（slot-map.md §3）。
         #expect(SurfaceManifest.w1Default.entry(for: "sidebar").mode == .web)
-        #expect(SurfaceManifest.w1Default.entry(for: W1.workspacesSlot).placement == .evacuated)
+        #expect(SurfaceManifest.w1Default.entry(for: W1.workspacesSlot).placement == .overlay)
         #expect(SurfaceManifest.w1Default.entry(for: W1.workspacesSlot).priority == -1)
+    }
+
+    @Test("W1 的落位必须是 overlay：`sidebar.workspaces` 是侧栏内部的一格，不是整条侧栏")
+    func w1WorkspacesIsOverlayNotEvacuated() {
+        // 返工的根因就在这一行。`evacuated` 的语义是「这块屏幕归原生 chrome，
+        // Web 一点都不占」—— 那适用于整条侧栏（W7 的 `sidebar`），不适用于
+        // 住在官方 `AppFrame` 侧栏 track 里、上有 header 下有 footer 的这一格：
+        // Web 侧一旦 `display: none`，官方那一格塌成 0 宽，原生栏只能另起一列，
+        // 于是整个 Web UI 被右推（那张被否掉的截图里 x≈225 就是这么来的）。
+        //
+        // 子槽仍然是 evacuated：它是暗槽（G-5），永不渲染，也就没有格子可占。
+        #expect(SurfaceManifest.w1Default.entry(for: W1.workspacesDirectoryFlowSlot).placement == .evacuated)
     }
 
     @Test("G-5：暗槽（被接管父槽下的子槽）不要求原生实现，但仍然是 native 语义")
@@ -367,7 +438,7 @@ struct RemoteSurfaceInfoTests {
       "protocol": 1,
       "manifest": {
         "sidebar.workspaces.directoryFlow": { "mode": "retired", "placement": "evacuated", "priority": -1 },
-        "sidebar.workspaces": { "mode": "native", "placement": "evacuated", "priority": -1 }
+        "sidebar.workspaces": { "mode": "native", "placement": "overlay", "priority": -1 }
       },
       "compareHotkey": "opt+shift+d",
       "census": { "web": 0, "mirrored": 0, "native": 1, "retired": 1 }
@@ -385,6 +456,8 @@ struct RemoteSurfaceInfoTests {
         ])
         #expect(info.manifest.entry(for: W1.workspacesSlot).mode == .native)
         #expect(info.manifest.entry(for: W1.workspacesDirectoryFlowSlot).mode == .retired)
+        // profile 里写的是 overlay：Web 侧留格、原生填格（见 W1 落位讨论）。
+        #expect(info.manifest.entry(for: W1.workspacesSlot).placement == .overlay)
         // 宿主只需要为一格准备原生实现：另一格是暗槽（G-5）。
         #expect(info.manifest.slotsRequiringNativeView == [W1.workspacesSlot])
     }

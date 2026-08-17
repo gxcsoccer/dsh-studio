@@ -62,9 +62,28 @@
             placement: evacuated
             priority: -1
           # W1's actual target: the workspaces section of the sidebar.
+          #
+          # `overlay`, NOT `evacuated`, and this single word is the whole W1
+          # geometry fix (ARCHITECTURE.md §4.2). `sidebar.workspaces` is a cell
+          # *inside* the official sidebar column: the shell owns that column's
+          # width, its logo, its footer. `evacuated` means "the Web layout gives
+          # this cell no room and the native chrome places the view itself" — so
+          # the native view had to be placed by SwiftUI next to the WebView,
+          # which is how the first W1 build produced a 150px-tall rail pinned to
+          # the window edge while the official UI was pushed a column to the
+          # right. `overlay` means the Web side still reserves the very cell the
+          # official occupant would have filled and reports it (`slot/rect`);
+          # the native view lands exactly there.
+          #
+          # This row is the authority (known-gaps.md G-4): the host adopts it
+          # over its compiled-in `SurfaceManifest.w1Default`, so a divergence
+          # here is invisible in Swift tests and fatal at runtime — which is
+          # precisely what happened. `contracts/w1-surface-configure.json` is
+          # the shared bytes, and `packages/studio-surface/tests/config.test.ts`
+          # now reads *this file* and compares it against them.
           sidebar.workspaces:
             mode: native
-            placement: evacuated
+            placement: overlay
             priority: -1
 
     # ── browser half: the client plugin the shell fetches ────────────────────

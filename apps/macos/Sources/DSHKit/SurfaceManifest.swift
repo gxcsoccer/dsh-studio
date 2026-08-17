@@ -282,8 +282,18 @@ extension SurfaceManifest {
     ///
     /// 仍然不遮蔽 `sidebar` 本身 —— 遮蔽它就得继承它三个子插槽的声明责任
     /// （slot-map.md §3 的坑），第一刀不该那么深。
+    ///
+    /// **落位是 `overlay`，不是 `evacuated`**（ARCHITECTURE.md §4.2）。
+    /// `sidebar.workspaces` 只是官方侧栏内部的一格：logo、新会话、footer、设置
+    /// 仍然由官方渲染在同一条侧栏里。撤离它 = 要求 Web 侧不占位，于是这一格只能
+    /// 由原生另开一列 —— 官方侧栏被劈成两半（W1 第一版就是这么错的）。这一格
+    /// 必须留在官方排版流里：Web 侧渲染等尺寸不可见占位并上报几何，原生精确填入。
+    /// 它不在滚动容器内（祖先 `.regionArea` 是 `overflow: hidden`，只裁不滚），
+    /// 因此不触碰 ADR-0003 的红线。
+    ///
+    /// 子槽那行的 `placement` 无所谓 —— 它是暗槽，永不落位。
     public static let w1Default = SurfaceManifest(slots: [
-        W1.workspacesSlot: SlotEntry(mode: .native, placement: .evacuated, priority: -1),
+        W1.workspacesSlot: SlotEntry(mode: .native, placement: .overlay, priority: -1),
         W1.workspacesDirectoryFlowSlot: SlotEntry(mode: .retired, placement: .evacuated, priority: -1),
     ])
 }

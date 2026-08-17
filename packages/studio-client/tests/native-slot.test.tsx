@@ -7,12 +7,16 @@
 
 import assert from 'node:assert/strict'
 import { afterEach, describe, test } from 'node:test'
-import { fakeResizeObservers, mountHarness, pinGeometry, type Harness } from './dom.ts'
+import { act } from 'react'
+import {
+  dom, fakeResizeObservers, mountHarness, pinGeometry, pinHitTest,
+  type Harness, type HarnessOptions,
+} from './dom.ts'
 import { createBridge, type Bridge } from '../src/client/bridge.ts'
 import { createInstanceLedger, pickActions, type InstanceLedger } from '../src/client/invoke.ts'
 import {
-  ORCHESTRATION_KEYS, hasScrollableAncestor, nativeSlot, serializeOrchestration, shallowDiff,
-  type NativeSlotOptions,
+  ORCHESTRATION_KEYS, hasScrollableAncestor, isOccluded, nativeSlot, serializeOrchestration,
+  shallowDiff, type NativeSlotOptions,
 } from '../src/client/native-slot.tsx'
 import { recordingTransport, type RecordingTransport, type SentEnvelope } from './helpers.ts'
 
@@ -46,7 +50,7 @@ const rigs: Rig[] = []
  */
 function rig(
   options: Partial<NativeSlotOptions> = {},
-  harnessOptions: { scrollable?: boolean } = {},
+  harnessOptions: HarnessOptions = {},
 ): Rig {
   const transport = recordingTransport()
   const bridge = createBridge({ transport })
@@ -226,6 +230,9 @@ describe('the four things it does, and nothing else (§1)', () => {
 })
 
 describe('placement (ARCHITECTURE.md §4)', () => {
+  /** jsdom's window is 1024×768; the proxy reports it as the CSS viewport. */
+  const VIEWPORT = { w: 1_024, h: 768 }
+
   test('evacuated takes no screen area and reports no geometry', () => {
     const instance = rig({ placement: 'evacuated' })
     instance.render({ wide: true })
@@ -233,49 +240,181 @@ describe('placement (ARCHITECTURE.md §4)', () => {
     assert.deepEqual(instance.events('slot/rect'), [])
   })
 
-  test('overlay keeps the layout with an invisible placeholder and reports its rect', () => {
-    const restoreGeometry = pinGeometry({ x: 12, y: 34, width: 260, height: 700 })
+  test('overlay reserves the cell with an invisible placeholder and reports its geometry', () => {
+    const geometry = pinGeometry({ x: 12, y: 34, width: 260, height: 700 })
     try {
       const instance = rig({ placement: 'overlay' })
       instance.render({ wide: true })
       const element = instance.harness.proxyElement(SLOT)
+      // `visibility: hidden`, never `display: none`: the box must stay in the
+      // layout or the official parent's cell collapses and the native view has
+      // no cell to fill (the W1 regression).
       assert.equal(element?.style.visibility, 'hidden')
       assert.notEqual(element?.style.display, 'none')
+      // Stretch, not shrink-to-fit: a bare div in a flex column reports a 0px
+      // tall rect, which is exactly how the first W1 build produced a 150px
+      // sidebar that stopped in mid-air.
+      assert.equal(element?.style.flex, '1 1 auto')
+      assert.equal(element?.style.alignSelf, 'stretch')
       assert.deepEqual(instance.events('slot/rect'), [{
         instanceId: instance.instanceId(),
         rect: { x: 12, y: 34, w: 260, h: 700 },
+        // Nothing clips here, so the clip box is the viewport itself.
+        clip: { x: 0, y: 0, ...VIEWPORT },
+        viewport: VIEWPORT,
         scrollable: false,
+        occluded: false,
+        dpr: 1,
       }])
     } finally {
-      restoreGeometry()
+      geometry.restore()
+    }
+  })
+
+  test('a clipping (but not scrolling) ancestor narrows clip, not rect (G-1)', () => {
+    // The official sidebar seat is `overflow: hidden`. Reporting that as
+    // `scrollable` gets the cell refused under ADR-0003 (no native rail at
+    // all); reporting it as nothing at all lets the native view spill over the
+    // conversation while the column animates. It is a third fact, so it gets
+    // its own field — and it must narrow `clip` only, never `rect`: the view is
+    // laid out at its full size and merely masked.
+    const observers = fakeResizeObservers()
+    const geometry = pinGeometry({ x: 0, y: 52, width: 260, height: 800 })
+    try {
+      const instance = rig({ placement: 'overlay' }, { clipping: true })
+      instance.render({ wide: true })
+      // The clipping ancestor reports a shorter box than the cell: the bottom
+      // 300px is cut off. It lands on the *second* measurement because the pin
+      // is per-element and the container only exists once the harness is up.
+      geometry.setFor(instance.harness.container, { x: 0, y: 52, width: 260, height: 500 })
+      observers.trigger()
+      const payload = instance.events('slot/rect')[1]
+      assert.deepEqual(payload?.rect, { x: 0, y: 52, w: 260, h: 800 })
+      assert.deepEqual(payload?.clip, { x: 0, y: 52, w: 260, h: 500 })
+      assert.equal(payload?.scrollable, false)
+    } finally {
+      geometry.restore()
+      observers.restore()
     }
   })
 
   test('a resize re-measures through ResizeObserver, not a polling loop', () => {
     const observers = fakeResizeObservers()
-    const restoreGeometry = pinGeometry({ x: 0, y: 0, width: 100, height: 100 })
+    const geometry = pinGeometry({ x: 0, y: 0, width: 100, height: 100 })
     try {
       const instance = rig({ placement: 'overlay' })
       instance.render({ wide: true })
       assert.equal(observers.observed, 1)
+
+      // An unchanged geometry is not forwarded: these observers fire on every
+      // frame of every scroll and resize in the document, and a control channel
+      // full of identical rects hides the events that matter.
+      observers.trigger()
+      assert.equal(instance.events('slot/rect').length, 1)
+
+      geometry.set({ x: 0, y: 0, width: 100, height: 420 })
       observers.trigger()
       assert.equal(instance.events('slot/rect').length, 2)
+      assert.deepEqual(instance.events('slot/rect')[1]?.rect, { x: 0, y: 0, w: 100, h: 420 })
+
       instance.harness.render(null)
       assert.equal(observers.disconnected, 1)
     } finally {
-      restoreGeometry()
+      geometry.restore()
       observers.restore()
     }
   })
 
+  test('an ancestor scroll re-measures too (capture, since scroll does not bubble)', () => {
+    const geometry = pinGeometry({ x: 0, y: 0, width: 100, height: 100 })
+    try {
+      const instance = rig({ placement: 'overlay' })
+      instance.render({ wide: true })
+      geometry.set({ x: 0, y: -40, width: 100, height: 100 })
+      act(() => {
+        instance.harness.container.dispatchEvent(new dom.window.Event('scroll'))
+      })
+      assert.deepEqual(instance.events('slot/rect')[1]?.rect, { x: 0, y: -40, w: 100, h: 100 })
+    } finally {
+      geometry.restore()
+    }
+  })
+
+  test('a fully covered cell reports occluded: the Web overlay wins (G-1)', () => {
+    // A native subview of the WKWebView cannot be painted under a Web modal
+    // scrim, so a covered cell must withdraw instead of floating on top of it.
+    const geometry = pinGeometry({ x: 0, y: 0, width: 260, height: 700 })
+    const scrim = dom.window.document.createElement('div')
+    dom.window.document.body.appendChild(scrim)
+    const restoreHitTest = pinHitTest(scrim)
+    try {
+      const instance = rig({ placement: 'overlay' })
+      instance.render({ wide: true })
+      assert.equal(instance.events('slot/rect')[0]?.occluded, true)
+    } finally {
+      restoreHitTest()
+      geometry.restore()
+      scrim.remove()
+    }
+  })
+
+  test('isOccluded samples every corner, and never counts the cell\'s own lineage', () => {
+    const harness = mountHarness()
+    const leaf = harness.container.ownerDocument.createElement('div')
+    harness.container.appendChild(leaf)
+    const box = { x: 0, y: 0, w: 260, h: 700 }
+    try {
+      // The placeholder is `visibility: hidden` and is therefore never hit
+      // itself: a bare cell resolves to its nearest visible ancestor. Counting
+      // that as occlusion would blank the native view permanently.
+      const restoreAncestor = pinHitTest(harness.container)
+      assert.equal(isOccluded(leaf, box), false)
+      restoreAncestor()
+
+      const foreign = harness.container.ownerDocument.createElement('div')
+      const restoreForeign = pinHitTest(foreign)
+      assert.equal(isOccluded(leaf, box), true)
+      // A box too small to sample meaningfully resolves toward visible: unknown
+      // must never mean "hide the native view".
+      assert.equal(isOccluded(leaf, { x: 0, y: 0, w: 1, h: 1 }), false)
+      restoreForeign()
+
+      // No `elementFromPoint` at all (jsdom's default) is also "visible".
+      assert.equal(isOccluded(leaf, box), false)
+    } finally {
+      harness.unmount()
+    }
+  })
+
   test('a scroll container ancestor is reported honestly (ADR-0003)', () => {
-    const restoreGeometry = pinGeometry({ x: 0, y: 0, width: 10, height: 10 })
+    const geometry = pinGeometry({ x: 0, y: 0, width: 10, height: 10 })
     try {
       const instance = rig({ placement: 'overlay' }, { scrollable: true })
       instance.render({ wide: true })
       assert.equal(instance.events('slot/rect')[0]?.scrollable, true)
     } finally {
-      restoreGeometry()
+      geometry.restore()
+    }
+  })
+
+  test('dpr is reported for diagnostics only, and never as the px→point scale', () => {
+    // Retina is dpr 2 while CSS px and points stay 1:1. Using dpr as the scale
+    // makes the native view exactly twice too big — the classic version of this
+    // bug, so the wire keeps the two numbers apart: `viewport` drives the
+    // scale, `dpr` is a log line.
+    const geometry = pinGeometry({ x: 0, y: 0, width: 260, height: 700 })
+    const view = dom.window as unknown as Record<string, unknown>
+    const previous = view.devicePixelRatio
+    Object.defineProperty(view, 'devicePixelRatio', { value: 2, configurable: true })
+    try {
+      const instance = rig({ placement: 'overlay' })
+      instance.render({ wide: true })
+      const payload = instance.events('slot/rect')[0]
+      assert.equal(payload?.dpr, 2)
+      assert.deepEqual(payload?.viewport, VIEWPORT)
+    } finally {
+      Object.defineProperty(view, 'devicePixelRatio', { value: previous, configurable: true })
+      geometry.restore()
     }
   })
 

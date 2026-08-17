@@ -65,3 +65,5 @@
 
 **规则的可执行形式：**
 `NativeSlotProxy` 在上报 `slot/rect` 时携带 `scrollable` 标记（检测祖先是否为滚动容器）。宿主收到 `placement: overlay` 且 `scrollable: true` 的组合时**直接拒绝并报错**，而不是尽力渲染。让违规在开发期就崩，别留到用户那里才发现。
+
+**注意「裁剪型 overflow」与「滚动型 overflow」是两个 bit，本 ADR 只管后者。** 祖先 `overflow: hidden`（会裁、不滚，例如官方 `.regionArea`）没有滚动时钟不同步的问题，overlay 在那里合法 —— 只需按上报的 `clip` 求交后 mask。所以 `slot/rect` 分开报 `clip` 与 `scrollable`：把两者当同一个 bit，会让这类插槽被误判为违规（见 [known-gaps.md G-8](../known-gaps.md)）。

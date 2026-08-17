@@ -7,14 +7,14 @@ import Foundation
 public enum SurfaceEvent: Sendable, Hashable {
     case mount(SlotMount)
     case props(instanceID: String, patch: [String: JSONValue])
-    case rect(instanceID: String, rect: SlotRect, scrollable: Bool)
+    case rect(instanceID: String, geometry: SlotGeometry)
     case unmount(instanceID: String)
     case error(SlotErrorReport)
 
     public var instanceID: String? {
         switch self {
         case .mount(let mount): mount.instanceID
-        case .props(let id, _), .rect(let id, _, _), .unmount(let id): id
+        case .props(let id, _), .rect(let id, _), .unmount(let id): id
         case .error(let report): report.instanceID
         }
     }
@@ -132,19 +132,7 @@ public enum SurfaceEventDecoder {
             let patch = try props(payload["props"] ?? .object([:]))
             return .props(instanceID: id, patch: patch)
         case ControlMethod.slotRect:
-            let id = try instanceID(payload)
-            guard let rectValue = payload["rect"], let rect = try? rectValue.decoded(as: SlotRect.self) else {
-                throw fault(.badPayload, "slot/rect requires rect{x,y,w,h}")
-            }
-            guard rect.isSane else {
-                throw fault(.badPayload, "slot/rect geometry is not sane: \(rect)")
-            }
-            guard let scrollable = payload["scrollable"]?.boolValue else {
-                // `scrollable` 是 ADR-0003 的判据，缺了不许默认为 false ——
-                // 默认 false 会把「不知道」静默当成「安全」。
-                throw fault(.badPayload, "slot/rect requires boolean `scrollable`")
-            }
-            return .rect(instanceID: id, rect: rect, scrollable: scrollable)
+            return .rect(instanceID: try instanceID(payload), geometry: try geometry(payload))
         case ControlMethod.slotUnmount:
             return .unmount(instanceID: try instanceID(payload))
         case ControlMethod.slotError:
@@ -239,6 +227,50 @@ public enum SurfaceEventDecoder {
             error: String(text.prefix(SurfaceInputLimits.maxErrorTextLength)),
             abdicated: abdicated
         )
+    }
+
+    /// 解 `slot/rect` 的几何（bridge-contract.md §1.7）。
+    ///
+    /// `clip` / `viewport` / `occluded` 是 G-1 补上的三个字段，**都可缺**：
+    /// 缺 `clip` = 没有裁剪祖先（等于 rect 本身），缺 `viewport` = 按比例 1
+    /// 处理，缺 `occluded` = 没被遮挡。这三条兜底都是「保持可见」方向的，
+    /// 因为一个旧版 client 半上报的几何仍然是可用的几何。
+    ///
+    /// 唯一不许缺的是 `scrollable`：它是 ADR-0003 的判据，默认 false 会把
+    /// 「不知道」静默当成「安全」。
+    private static func geometry(_ payload: JSONValue) throws -> SlotGeometry {
+        guard let rectValue = payload["rect"], let rect = try? rectValue.decoded(as: SlotRect.self) else {
+            throw fault(.badPayload, "slot/rect requires rect{x,y,w,h}")
+        }
+        guard let scrollable = payload["scrollable"]?.boolValue else {
+            throw fault(.badPayload, "slot/rect requires boolean `scrollable`")
+        }
+        var clip: SlotRect?
+        if let clipValue = payload["clip"], !clipValue.isNull {
+            guard let decoded = try? clipValue.decoded(as: SlotRect.self) else {
+                throw fault(.badPayload, "slot/rect `clip` must be rect{x,y,w,h}")
+            }
+            clip = decoded
+        }
+        var viewport: SlotSize?
+        if let viewportValue = payload["viewport"], !viewportValue.isNull {
+            guard let decoded = try? viewportValue.decoded(as: SlotSize.self) else {
+                throw fault(.badPayload, "slot/rect `viewport` must be size{w,h}")
+            }
+            viewport = decoded
+        }
+        let geometry = SlotGeometry(
+            rect: rect,
+            clip: clip,
+            viewport: viewport,
+            scrollable: scrollable,
+            occluded: payload["occluded"]?.boolValue ?? false,
+            devicePixelRatio: payload["dpr"]?.doubleValue
+        )
+        guard geometry.isSane else {
+            throw fault(.badPayload, "slot/rect geometry is not sane: \(geometry)")
+        }
+        return geometry
     }
 
     private static func instanceID(_ payload: JSONValue) throws -> String {

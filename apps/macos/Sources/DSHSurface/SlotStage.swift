@@ -3,7 +3,7 @@ import DSHKit
 
 /// 原生插槽视图的舞台：`instanceId` → 已装配的视图。
 ///
-/// DSHApp 通过 `NativeSlotOutlet` 观察它。舞台只知道「哪个实例该在哪」，
+/// DSHApp 通过 `NativeSlotLayer` 观察它。舞台只知道「哪个实例该在哪」，
 /// 不知道视图内部在渲染什么。
 @MainActor
 @Observable
@@ -20,8 +20,13 @@ public final class SlotStage {
         public let instance: SlotInstance
         public let view: AnyView
         public var presentation: Presentation
-        /// 仅 overlay 落位有值。
-        public var frame: CGRect?
+        /// 最近一次 `slot/rect` 的几何（CSS px，视口坐标）。
+        ///
+        /// 只有「Web 侧让位、原生填格」的落位（overlay）才有值，且**这里存的是
+        /// 未换算的原始几何** —— CSS px → point 的换算需要 WKWebView 的点尺寸，
+        /// 而那个尺寸只有视图层知道（`NativeSlotLayer` 的 `GeometryReader`）。
+        /// 舞台不猜它，也就不会存一份「差不多对」的 frame。
+        public var geometry: SlotGeometry?
 
         public var id: String { instance.id }
         public var slot: String { instance.slot }
@@ -51,9 +56,9 @@ public final class SlotStage {
         mounted.removeValue(forKey: instanceID)
     }
 
-    func position(_ instanceID: String, to rect: SlotRect) {
+    func position(_ instanceID: String, to geometry: SlotGeometry) {
         guard var item = mounted[instanceID] else { return }
-        item.frame = CGRect(x: rect.x, y: rect.y, width: rect.w, height: rect.h)
+        item.geometry = geometry
         mounted[instanceID] = item
     }
 }

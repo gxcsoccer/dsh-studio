@@ -172,13 +172,35 @@ ctx.effect(() => ctx.slots.register(
 适用：`sidebar*`、`details`、`settings.*`、`root`。
 优点：没有坐标同步、没有滚动同步、没有点击穿透问题。**能撤离就撤离。**
 
+**适用的前提是「整块」，W1 上栽在这一条。** evacuated 成立的隐含条件是：那一格的**几何由谁决定**这件事，可以整块交给原生 chrome。`sidebar` 这一列满足；而 `sidebar.workspaces` **不满足** —— 它是官方 `sidebar` 列里的一格，列宽、logo、新会话按钮、脚部设置入口全归官方 shell。把它标成 evacuated 的后果是：Web 侧不留位（`display: none`），原生视图只能由 SwiftUI 自己去猜位置，于是它变成 WebView 的**兄弟列**（`HSplitView`），把官方 UI 整体右推一列，自己被挤到窗口最左、高度由内容撑成 150pt，文字左侧被切。
+
+判据因此可以写成一句话：**父容器还归官方 → 只能 overlay；整个容器都归我们 → 才能 evacuated。**
+
 ### 4.2 Overlay（覆盖式，**受限使用**）
 
 原生视图按 Web 上报的 rect 悬浮在 WebView 之上。Web 侧代理组件渲染一个等尺寸的透明占位来撑住布局。
 
-适用：只在插槽必须留在 Web 排版流里时使用，例如 `conversation.input.model`、`conversation.input.plan` 这类嵌在工具行里的小控件。
+适用：只在插槽必须留在 Web 排版流里时使用，例如 `conversation.input.model`、`conversation.input.plan` 这类嵌在工具行里的小控件；以及 **W1 的 `sidebar.workspaces`** —— 官方列里的一格（见 §4.1 末尾的判据）。
+
+overlay 的几何链有四个环节，缺一个就漂移；W1 的实现把它们分别落在这些地方：
+
+| 环节 | 谁负责 | 形态 |
+| --- | --- | --- |
+| ① 让出这一格 | `NativeSlotProxy` 的占位 `<div>` | `flex: 1 1 auto` + `align-self: stretch` + `min-*: 0`，与官方占位者的 CSS 一致（否则 flex 列里塌成 0 高） |
+| ② 上报这一格 | `measureGeometry` → `slot/rect` | `rect` / `clip`（裁剪祖先求交）/ `viewport` / `scrollable` / `occluded` / `dpr` |
+| ③ 换算到点 | `SlotGeometryResolver` | `scale = webView 宽 / viewport 宽`（**不是 `dpr`**：dpr 是点→物理像素，与本换算无关） |
+| ④ 落位与裁剪 | `NativeSlotLayer` = WebView 的 `.overlay` | 布局按 `frame`（完整 rect），呈现按 `visibleFrame`（与 `clip` 求交）mask |
+
+第 ④ 条里「本层就是 WebView 的 overlay」是刻意的：这样「WebView 在窗口里的原点」在结构上恒为 `(0,0)`，少一次能算错的换算。dogfood 实测（`DSH_STUDIO_LOG_GEOMETRY=1`）：
+
+```
+webView=1669.0x1052.0 placement=overlay rect=(12.0,120.0,268.0x884.0) clip=(8.0,120.0,272.0x884.0)
+viewport=1669.0x1052.0 scale=1.0 frame=(12.0,120.0,268.0x884.0) visibleFrame=(12.0,120.0,268.0x884.0) renderable=true
+```
 
 **硬规则：滚动容器内部不许 overlay。** `conversation.chat.node` 在转录滚动区里，逐节点 overlay 会掉帧、错位、撕裂。遇到这种情况**向上升级到最近的可撤离祖先**（即整块 `conversation.view` 一次性原生化，从事件流自己渲染转录）。详见 [ADR-0003](./docs/adr/0003-no-overlay-inside-scroll-containers.md)。
+
+注意 ADR-0003 管的是**滚动**祖先，不是**裁剪**祖先：官方 `.regionArea` 是 `overflow: hidden`（会裁、不滚），把两者当同一个 bit 会让这一格要么被误判为违规、要么在折叠动画里溢出到会话区。所以 `slot/rect` 分开报 `clip` 与 `scrollable`。
 
 ---
 
@@ -205,7 +227,8 @@ ctx.effect(() => ctx.slots.register(
 # studio profile 的 config，Schemastery 校验
 surface:
   sidebar:              { mode: native,   placement: evacuated }
-  sidebar.workspaces:   { mode: native,   placement: evacuated }
+  # 官方 sidebar 列里的一格 → overlay（§4.1 的判据）。这一行就是 W1 的实配。
+  sidebar.workspaces:   { mode: native,   placement: overlay }
   conversation.composer:{ mode: mirrored, placement: evacuated }
   conversation.view:    { mode: web }
   tool.call.toolview:
@@ -261,7 +284,7 @@ TS 侧还有一层免费保险：插槽是 declaration merging 出来的类型�
 
 | 波 | 目标 | 落位 | 为什么排这个位置 |
 | --- | --- | --- | --- |
-| **W1** | `sidebar` + 三个子插槽 | evacuated | 纯导航，无流式内容；原生收益立刻可见（列表密度、键盘、拖拽）；失败面小 |
+| **W1** | `sidebar` + 三个子插槽 | `sidebar` 整列 evacuated；接管过程中每一格 overlay | 纯导航，无流式内容；原生收益立刻可见（列表密度、键盘、拖拽）；失败面小。注意顺序：`sidebar.workspaces` 先 overlay 落在官方列里（第一刀），等三个子槽都归我们，`sidebar` 才能整列 evacuated |
 | **W2** | `settings.*`、`details` | evacuated | 表单与面板最适合原生控件；与消息流解耦 |
 | **W3** | `conversation.session.header`、`shell.overlay` | evacuated | 会话框架层，为 W4 腾出原生 chrome |
 | **W4** | `conversation.composer`（chain takeover）+ `input.*` | evacuated / 少量 overlay | 官方预留 takeover；输入法、快捷键、拖拽附件是原生强项 |

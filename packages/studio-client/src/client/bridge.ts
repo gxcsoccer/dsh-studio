@@ -113,6 +113,35 @@ export interface SurveyedSlot {
 /** Geometry of an overlay placement (CSS pixels, viewport coordinates). */
 export interface WireRect { x: number; y: number; w: number; h: number }
 
+/**
+ * Everything the host needs to place one native view into a reserved Web cell
+ * — the wire form of the G-1 fix (known-gaps.md).
+ *
+ * The first cut of this event carried `{ rect, scrollable }`. Two questions
+ * were unanswerable with that alone, and both of them are visible on screen:
+ * *how far may I paint* (an ancestor with `overflow: hidden` cuts the cell, so
+ * a native view sized to `rect` spills past the cut during a fold animation),
+ * and *should I paint at all* (a modal scrim covers the cell, but a native
+ * subview of the WKWebView cannot be covered by Web content).
+ *
+ * All lengths are CSS pixels in viewport coordinates, which is what the DOM
+ * measures in; converting to points is the host's job and needs `viewport`.
+ */
+export interface WireGeometry {
+  /** The reserved cell, `getBoundingClientRect` (scroll already applied). */
+  rect: WireRect
+  /** Ancestor clip chain ∩ viewport — the box the cell may paint inside. */
+  clip: WireRect
+  /** CSS viewport size; the host derives its px→point scale from it. */
+  viewport: { w: number; h: number }
+  /** ADR-0003's criterion: does any ancestor *scroll* (not merely clip). */
+  scrollable: boolean
+  /** Is the cell fully covered by Web content right now. */
+  occluded: boolean
+  /** Diagnostics only: point→device-pixel ratio, never the px→point scale. */
+  dpr: number
+}
+
 /** Payload of each outbound event (§1.3). */
 export interface OutboundEventPayloads {
   'surface/ready': { protocol: number; slots: SurveyedSlot[] }
@@ -135,7 +164,7 @@ export interface OutboundEventPayloads {
     actions: string[]
   }
   'slot/props': { instanceId: string; props: Record<string, unknown> }
-  'slot/rect': { instanceId: string; rect: WireRect; scrollable: boolean }
+  'slot/rect': { instanceId: string } & WireGeometry
   'slot/unmount': { instanceId: string }
   'slot/error': { slot: string; instanceId?: string; error: string; abdicated: boolean }
 }

@@ -40,7 +40,7 @@ import {
   type DynamicRegisterOptions, type LiveSlotNode, type StoredEntry, type StudioContext,
 } from './upstream.ts'
 
-export type { Bridge, BridgeErrorCode, SurveyedSlot, WireError, WireRect } from './bridge.ts'
+export type { Bridge, BridgeErrorCode, SurveyedSlot, WireError, WireGeometry, WireRect } from './bridge.ts'
 export type { HeartbeatResponder, PingPayload, PongPayload } from './heartbeat.ts'
 export { HEARTBEAT_INTERVAL_MS, HEARTBEAT_MISS_THRESHOLD } from './heartbeat.ts'
 export type {

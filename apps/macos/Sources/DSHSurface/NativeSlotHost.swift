@@ -87,11 +87,16 @@ public final class NativeSlotHost {
         case .mount(let mount):
             try handleMount(mount)
 
-        case .rect(let instanceID, let rect, let scrollable):
+        case .rect(let instanceID, let geometry):
             // ── ADR-0003 的执行点 ────────────────────────────────────
-            // 滚动容器内不许 overlay。不「尽力渲染」，直接失败 ——
+            // 滚动容器内不许按 rect 落位。不「尽力渲染」，直接失败 ——
             // 漂移是视觉撕裂，比崩溃更难发现、对用户更像坏产品。
-            if scrollable {
+            //
+            // 注意判据是「祖先**可滚动**」，不是「祖先裁剪」：`overflow: hidden`
+            // 的祖先（W1 目标插槽所在的官方 `.regionArea` 就是）只会裁剪，不会
+            // 在合成线程上独立移动内容，因此不构成漂移源 —— 它的影响由
+            // `geometry.clip` 表达（known-gaps.md G-1）。
+            if geometry.scrollable {
                 let error = SurfaceError.overlayInsideScrollContainer(
                     slot: live[instanceID]?.slot ?? "?",
                     instanceID: instanceID
@@ -104,7 +109,8 @@ public final class NativeSlotHost {
                 return
             }
             guard instance.placement == .overlay else {
-                // evacuated 插槽不该上报几何：Web 侧代理写错了，或者不是我们的代理。
+                // evacuated 插槽不占 Web 布局，也就没有 rect 可上报：Web 侧代理
+                // 写错了，或者不是我们的代理。
                 let error = SurfaceError.geometryForEvacuatedPlacement(
                     slot: instance.slot,
                     instanceID: instanceID
@@ -112,7 +118,7 @@ public final class NativeSlotHost {
                 telemetry.assemblyRejected(error)
                 throw error
             }
-            stage.position(instanceID, to: rect)
+            stage.position(instanceID, to: geometry)
 
         case .props(let instanceID, let patch):
             guard let instance = live[instanceID] else {
@@ -205,7 +211,7 @@ public final class NativeSlotHost {
             instance: instance,
             view: make(instance),
             presentation: entry.mode == .mirrored ? .offscreenComparison : .visible,
-            frame: nil
+            geometry: nil
         ))
     }
 

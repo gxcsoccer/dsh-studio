@@ -47,16 +47,34 @@ export interface Harness {
   proxyElement(slot: string): HTMLElement | null
 }
 
+/** Ancestor traits a geometry test needs the container to have. */
+export interface HarnessOptions {
+  /** `overflow-y: auto` — a scroll container, which ADR-0003 refuses. */
+  scrollable?: boolean
+  /**
+   * `overflow: hidden` — clips but never scrolls, like the official sidebar's
+   * region seat. Keeping the two apart is the whole point of `clip` on the wire.
+   */
+  clipping?: boolean
+}
+
 /**
  * Mount a container into the shared document.
- * @param options - `scrollable` wraps the tree in a scroll container so the
- * ADR-0003 detection has something to find.
+ * @param options - ancestor traits, so the proxy's chain walk has something to
+ * find.
  * @returns the harness.
  */
-export function mountHarness(options: { scrollable?: boolean } = {}): Harness {
+export function mountHarness(options: HarnessOptions = {}): Harness {
   const document = dom.window.document
   const container = document.createElement('div')
   if (options.scrollable === true) container.style.overflowY = 'auto'
+  // Both axes explicitly: jsdom's `getComputedStyle` does not expand the
+  // `overflow` shorthand into `overflowX` / `overflowY`, which is what the proxy
+  // reads.
+  if (options.clipping === true) {
+    container.style.overflowX = 'hidden'
+    container.style.overflowY = 'hidden'
+  }
   document.body.appendChild(container)
   const root = createRoot(container)
   return {
@@ -123,22 +141,60 @@ export function fakeResizeObservers(): FakeResizeObservers {
   }
 }
 
+/** A rect as the tests state it. */
+export interface PinnedRect { x: number; y: number; width: number; height: number }
+
+/** Control surface of {@link pinGeometry}. */
+export interface PinnedGeometry {
+  /** Change the rect every non-overridden element reports. */
+  set(rect: PinnedRect): void
+  /**
+   * Report a different rect for one element — how a clipping ancestor is
+   * expressed, since the proxy measures the ancestor chain as well as itself.
+   */
+  setFor(element: Element, rect: PinnedRect): void
+  restore(): void
+}
+
 /**
  * Pin `getBoundingClientRect` for the duration of a test (jsdom reports zeros
  * for everything, which would make a geometry assertion vacuous).
- * @param rect - the geometry to report.
- * @returns a restore function.
+ * @param rect - the geometry every element reports by default.
+ * @returns the control surface; `restore` puts the real method back.
  */
-export function pinGeometry(rect: { x: number; y: number; width: number; height: number }): () => void {
+export function pinGeometry(rect: PinnedRect): PinnedGeometry {
   const prototype = dom.window.HTMLElement.prototype as unknown as { getBoundingClientRect: () => unknown }
   const previous = prototype.getBoundingClientRect
-  prototype.getBoundingClientRect = () => ({
-    ...rect,
-    top: rect.y,
-    left: rect.x,
-    right: rect.x + rect.width,
-    bottom: rect.y + rect.height,
-    toJSON: () => rect,
+  const overrides = new WeakMap<Element, PinnedRect>()
+  let fallback = rect
+  const expand = (value: PinnedRect): unknown => ({
+    ...value,
+    top: value.y,
+    left: value.x,
+    right: value.x + value.width,
+    bottom: value.y + value.height,
+    toJSON: () => value,
   })
-  return () => { prototype.getBoundingClientRect = previous }
+  prototype.getBoundingClientRect = function (this: Element) {
+    return expand(overrides.get(this) ?? fallback)
+  }
+  return {
+    set(next) { fallback = next },
+    setFor(element, next) { overrides.set(element, next) },
+    restore() { prototype.getBoundingClientRect = previous },
+  }
 }
+
+/**
+ * Install a `document.elementFromPoint` double (jsdom has no layout and ships
+ * none, so the proxy's occlusion sampling bails out to "visible" by default).
+ * @param hit - what a sample at any point lands on; `null` means nothing.
+ * @returns a restore function.
+ */
+export function pinHitTest(hit: Element | null): () => void {
+  const target = dom.window.document as unknown as Record<string, unknown>
+  const previous = target.elementFromPoint
+  target.elementFromPoint = () => hit
+  return () => { target.elementFromPoint = previous }
+}
+

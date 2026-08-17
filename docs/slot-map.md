@@ -44,10 +44,12 @@
 | 插槽 | kind | scope | owner props | placement |
 | --- | --- | --- | --- | --- |
 | `sidebar` | single | root | `SidebarOwnerProps` | evacuated |
-| `sidebar.workspaces` | single | root | `SidebarSectionOwnerProps` | evacuated |
+| `sidebar.workspaces` | single | root | `SidebarSectionOwnerProps` | **overlay** |
 | `sidebar.settings` | single | root | `SidebarSettingsOwnerProps` | evacuated |
 | `sidebar.footer.action` | list | root | `SidebarFooterActionOwnerProps` | evacuated |
 | `sidebar.workspaces.directoryFlow` | single | root | `DirectoryFlowOwnerProps`（`ui-workspace` 声明） | evacuated |
+
+`sidebar.workspaces` 的落位从 evacuated 改成 **overlay**，是 W1 实装后改的（[ARCHITECTURE.md §4.1](../ARCHITECTURE.md) 末尾的判据）：它是官方 `sidebar` 列**里**的一格，列宽与上下邻居都还归官方 shell，Web 侧必须继续留出这一格，原生视图才有位置可填。evacuated 只留给「整个容器都归我们」的那一天 —— 即 `sidebar` 这一行本身。`directoryFlow` 保持 evacuated：它是 `retired` 暗槽，原生侧用 `NSOpenPanel`，永不渲染，也就没有几何。
 
 选它做首波的理由：
 

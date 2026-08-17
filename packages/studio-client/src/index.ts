@@ -19,7 +19,7 @@ export {
 } from './client/bridge.ts'
 export type {
   BridgeErrorCode, InboundMethod, OutboundEvent, OutboundEventPayloads,
-  SurveyedSlot, WireError, WireRect, WireScope,
+  SurveyedSlot, WireError, WireGeometry, WireRect, WireScope,
 } from './client/bridge.ts'
 export { HEARTBEAT_INTERVAL_MS, HEARTBEAT_MISS_THRESHOLD } from './client/heartbeat.ts'
 export type { PingPayload, PongPayload } from './client/heartbeat.ts'

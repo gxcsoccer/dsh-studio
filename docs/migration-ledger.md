@@ -27,7 +27,7 @@
 
 | # | 插槽 | key/id | 波 | 落位 | 状态 | 上游版本 | 开工 | 完成 | 已知差异 | 回退 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `sidebar.workspaces` | — | W1 | evacuated | `building` | `ui-sidebar` / `ui-workspace` @ master `47f9438` | 2026-08-17 | — | 控制通道无运行期心跳（[G-3](./known-gaps.md)），上线前必须补 | manifest 改 `mode: web`；或 `⌥⇧D` 热切 |
+| 1 | `sidebar.workspaces` | — | W1 | **overlay** | `building` | `ui-sidebar` / `ui-workspace` @ master `47f9438` | 2026-08-17 | — | 控制通道无运行期心跳（[G-3](./known-gaps.md)），上线前必须补 | manifest 改 `mode: web`；或 `⌥⇧D` 热切 |
 
 **第 1 条的当前进展**：三样一次性投资 + 原生视图已实现并通过测试（TS 166 项、Swift 131 项全绿），尚未进入 `mirrored` 对照期（流水线第 ④ 步）。父槽 `sidebar` **刻意不接管**，原因见 [G-2](./known-gaps.md)。
 
@@ -41,7 +41,7 @@
 
 | 插槽 | 落位 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| `sidebar.workspaces` | evacuated | `planned` | **第一刀**。先只遮蔽子槽，把 `sidebar` 这一格留给官方 shell，避免继承子插槽声明责任 |
+| `sidebar.workspaces` | **overlay** | `planned` | **第一刀**。先只遮蔽子槽，把 `sidebar` 这一格留给官方 shell，避免继承子插槽声明责任 —— 代价就是这一格只能 overlay：官方还拥有这一列 |
 | `sidebar.footer.action` | evacuated | `planned` | `list`，按 id 逐条；第三方条目保持官方 |
 | `sidebar.settings` | evacuated | `planned` | 与 W2 的 `settings.*` 合并考虑 |
 | `sidebar.workspaces.directoryFlow` | evacuated | `planned` | 原生目录选择器（`NSOpenPanel`）的直接收益点 |

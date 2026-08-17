@@ -10,9 +10,13 @@ import DSHKit
 /// 白名单外的 key 一律**丢弃并上报**，不是「先用着」——
 /// 一次「就这一个字段先走 postMessage 吧」的妥协，就是终局重写的开始。
 public enum OrchestrationProps {
+    /// `wide` 是上游 `sidebar.workspaces` 的**折叠事实**（`SidebarSectionOwnerProps.wide`，
+    /// true = 展开）。它必须在白名单里：官方从来不发 `collapsed`，少了这一项，
+    /// 折叠态就永远读不到 —— 而且会被当成「领域数据越界」记一笔假账。
+    /// 它是编排（谁多宽），不是领域数据。Web 侧同名白名单里已经有它。
     public static let allowed: Set<String> = [
         "collapsed", "selected", "expanded", "width", "disabled",
-        "placeholder", "variant", "order", "label",
+        "placeholder", "variant", "order", "label", "wide",
     ]
 
     /// 拆成「允许过桥的」与「违规的领域字段」两半。
@@ -40,7 +44,14 @@ public struct SlotProps: Hashable, Sendable {
 
     public subscript(key: String) -> JSONValue? { storage[key] }
 
-    public var collapsed: Bool { storage["collapsed"]?.boolValue ?? false }
+    /// 折叠态。
+    ///
+    /// 上游的字段是 `wide`（true = 展开），`collapsed` 只是我们自己的兜底命名。
+    /// 两者都读，`wide` 优先 —— 契约的真相在上游那一侧。
+    public var collapsed: Bool {
+        if let wide = storage["wide"]?.boolValue { return !wide }
+        return storage["collapsed"]?.boolValue ?? false
+    }
     public var expanded: Bool { storage["expanded"]?.boolValue ?? true }
     public var disabled: Bool { storage["disabled"]?.boolValue ?? false }
     /// 当前选中项的 id（编排状态：谁高亮，不是会话内容）。
@@ -151,5 +162,37 @@ public final class SlotInstance: Identifiable {
 
     func retire() {
         isLive = false
+    }
+}
+
+extension SlotInstance {
+    /// **只用于离屏渲染 / 预览**：一个不接桥的实例。
+    ///
+    /// `invoker` 为 nil，于是任何 `invoke` 都以 `slotNotMounted` 失败 —— 预览
+    /// 用的实例不该看起来像能对 Web 侧下命令。真身仍然只能由 `NativeSlotHost`
+    /// 在收到 `slot/mount` 时创建（bridge-contract.md §1.4）。
+    public static func preview(
+        slot: String,
+        instanceID: String = "preview",
+        key: String? = nil,
+        scope: SlotScope = .root,
+        props: [String: JSONValue] = [:],
+        actions: [String] = [],
+        placement: Placement = .overlay,
+        mode: SlotMode = .native
+    ) -> SlotInstance {
+        SlotInstance(
+            mount: SlotMount(
+                slot: slot,
+                instanceID: instanceID,
+                key: key,
+                scope: scope,
+                props: props,
+                actions: actions
+            ),
+            placement: placement,
+            mode: mode,
+            invoker: nil
+        )
     }
 }

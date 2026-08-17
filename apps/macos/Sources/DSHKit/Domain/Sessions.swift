@@ -82,6 +82,33 @@ public struct SessionSummary: Hashable, Sendable, Codable, Identifiable {
         self.projections = projections
     }
 
+    /// 侧栏那一列灰色的相对时间（上游 `.time`）。
+    ///
+    /// 分档与文案抄自上游 `ui-workspace/src/client/tree.ts` 的 `relativeTime()`
+    /// 与 `locales.ts` 的 `time.*`：`刚刚 / n分钟 / n小时 / n天 / n个月 / n年`。
+    /// 自己另发明一套（例如 macOS 的 `RelativeDateTimeFormatter`，会说「3 分钟前」）
+    /// 就是在同一条侧栏里放两种时间写法 —— 用户看得出来。
+    ///
+    /// **单位是毫秒**：上游 `Rows.tsx` 把 `row.updatedAt` 直接和 `Date.now()` 相减。
+    /// 但这一位是从 runtime JSON 原样带过来的数字，写错单位的症状是「所有会话都
+    /// 显示 56 年」，所以这里带一条**显式**的兜底：小于 `1e11` 的值只可能是秒
+    /// （1e11 毫秒 = 1973 年，1e11 秒 = 5138 年），按秒解释。
+    public func relativeUpdatedLabel(now: Date) -> String {
+        let milliseconds = abs(updatedAt) < 1e11 ? updatedAt * 1000 : updatedAt
+        let diff = max(0, now.timeIntervalSince1970 * 1000 - milliseconds)
+        let minute = 60_000.0
+        let hour = 3_600_000.0
+        let day = 86_400_000.0
+        switch diff {
+        case ..<minute: return "刚刚"
+        case ..<hour: return "\(Int(diff / minute))分钟"
+        case ..<day: return "\(Int(diff / hour))小时"
+        case ..<(30 * day): return "\(Int(diff / day))天"
+        case ..<(365 * day): return "\(Int(diff / (30 * day)))个月"
+        default: return "\(Int(diff / (365 * day)))年"
+        }
+    }
+
     /// 侧栏显示名：标题投影 → cwd 末段 → 短 id。
     public var displayTitle: String {
         if let title = projections?.title, !title.isEmpty { return title }

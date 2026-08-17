@@ -1,12 +1,12 @@
 # Known Gaps — 实现暴露的设计缺口
 
-W1 实现（`packages/studio-client`、`packages/studio-surface`、`apps/macos`）完成后，有七个缺口是**设计阶段没看出来、写代码才暴露**的。前三个（G-1 ~ G-3）是设计缺口，G-4 / G-5 是**两端联调时才暴露的契约分歧**，G-6 是**只在生产路径上炸、被 140 多个绿灯用例完整掩盖**的并发实现坑，G-7 是**两侧单测全绿却端到端全拒**的跨语言 wire 分歧。记在这里而不是埋在 commit message 里，因为它们会影响后续波次的取舍。
+W1 实现（`packages/studio-client`、`packages/studio-surface`、`apps/macos`）完成后，有八个缺口是**设计阶段没看出来、写代码才暴露**的。前三个（G-1 ~ G-3）是设计缺口，G-4 / G-5 是**两端联调时才暴露的契约分歧**，G-6 是**只在生产路径上炸、被 140 多个绿灯用例完整掩盖**的并发实现坑，G-7 是**两侧单测全绿却端到端全拒**的跨语言 wire 分歧，G-8 是**把插槽在官方 DOM 里的角色看错**导致的落位方式错误（视觉直接跑偏）。记在这里而不是埋在 commit message 里，因为它们会影响后续波次的取舍。
 
 每一条都注明：现状怎么绕过的、什么时候必须真正解决、以及是否需要上游配合。
 
 ---
 
-## G-1 `slot/rect` 只给几何，不给 z-order 与裁剪祖先
+## G-1 `slot/rect` 只给几何，不给 z-order 与裁剪祖先 ✅ 已解决（几何携带完整信息 + 纯函数解析）
 
 **问题**
 overlay 落位的原生视图永远在 WKWebView 之上。但 Web 侧上报的 `rect` 只有位置和尺寸，没有：
@@ -26,6 +26,15 @@ W4。`conversation.input.left/right/model/plan` 是设计里唯一允许 overlay
 不扩 `slot/rect`，而是**取消这四个插槽的 overlay 过渡态**：W4 一次性把 `conversation.composer` 整块撤离，让这四个控件直接变成原生 composer 的内部布局。设计文档已经把它们标为「过渡态，随 composer 接管消失」—— 这个缺口说明**过渡态不该存在，应该直接跳到终态**。
 
 如果确实需要保留 overlay，则需给 `slot/rect` 增加 `clipRect`（祖先裁剪后的可见矩形）与 `occluded: boolean`，由 Web 侧用 `elementFromPoint` 采样判定。成本不低，且每帧都要算 —— 这也是倾向前一种解法的原因。
+
+**解决状态（W1）**
+`slot/rect` 不再只报一个矩形，而是携带完整信息：`rect` / `clip`（裁剪祖先逐级求交后的可见矩形）/ `viewport` / `scrollable` / `occluded`（`elementFromPoint` 采样）/ `dpr`（契约见 [bridge-contract.md §1.7](./bridge-contract.md)）。宿主侧用纯函数 `SlotGeometryResolver`（`Sources/DSHKit/SlotGeometry.swift`）解析，规则三条、无副作用、可单测（`SlotGeometryTests.swift`）：
+
+- `visibleFrame = frame ∩ clip ∩ bounds`；
+- `scale = webViewSize.width / viewport.w`（Web CSS 像素 → 宿主点，不信 `dpr` 单独一个数）；
+- `occluded == true` 或可见面积为 0 → **不渲染**（不是画一个错位的视图）。
+
+于是原生视图**能自证「该不该显示、该被裁到多大」**，G-1 的两个缺项（z-order / 裁剪祖先）都有了显式字段。W4 的倾向解法（取消 `input.*` 的 overlay 过渡态、整块撤离 composer）不变 —— 这条只是把过渡期的 overlay 做成**可判定**的，而不是把 overlay 升格成一等落位。
 
 ---
 
@@ -191,6 +200,33 @@ Swift 152 个用例、TS 199 个用例全绿，因为两边各测**自己手写�
 **留下的规律**
 `Codable` 的**默认值不等于线上的存在性**。控制通道上每一条会真正上线的 payload，都必须有一份两侧共读的 golden：测「我以为」测不出跨语言的缝，只有测同一份字节才行。
 
+---
+
+## G-8 落位方式必须由插槽在官方 DOM 里的真实角色决定 ✅ 已解决（本轮最有价值的发现）
+
+**问题**
+`sidebar.workspaces` 此前按 `evacuated`（整块撤离）处理。这是错的：上游 `SidebarRoot.tsx` 里它只是 `.regionArea` **内部的一个 cell**，官方 sidebar 的 header / footer 仍由 Web 渲染 —— 它从来不是一整块区域。
+
+按 `evacuated` 处理的后果是两处叠加的形变：
+
+1. 原生栏被放成 WKWebView 的**兄弟列**，把 Web 内容整体右推约 225px；
+2. Web 侧留下的占位符是裸的 `visibility: hidden` div，在 flex column 里**塌缩成约 0 高**，于是原生栏只剩约 150px 高、文字被裁切。
+
+用户看到的「很丑 + 没和 Web 对齐」就是这两条的合成结果。
+
+**解决状态（W1）**
+WebView 占满内容区，原生视图以**受控 overlay** 精确覆盖 Web 让出的那块 rect（`NativeSlotLayer` = WebView 的 `.overlay`，几何按 G-1 的解析结果）。
+
+**留下的规律（比修复本身更重要）**
+> **落位方式必须由该插槽在官方 DOM 里的真实角色决定，不能凭「它看起来像一整块区域」来推断。**
+
+判据是读上游的 JSX/CSS：它是某个容器的**唯一子树**才可能 `evacuated`；它只是容器里的一个 cell（还有兄弟由 Web 渲染）就只能 overlay。
+
+**overlay 与 ADR-0003 如何共存**
+[ADR-0003](./adr/0003-no-overlay-inside-scroll-containers.md) 禁的是**滚动容器内部**的 overlay（漂移是两套渲染管线不共享时钟导致的结构性问题）。本轮把 **「裁剪型 overflow」与「滚动型 overflow」分成两个 bit**：官方 `.regionArea` 是 `overflow: hidden` —— 会裁、不滚。本槽属于裁剪型，没有滚动时钟问题，所以 overlay 合法且不违反 ADR-0003。`slot/rect` 因此分开上报 `clip` 与 `scrollable`，宿主只对 `scrollable: true` 的 overlay 硬拒。区分写在 [ARCHITECTURE.md §4](../ARCHITECTURE.md) 与 ADR-0003 的「执行」一节。
+
+---
+
 ## G-1 ~ G-3 的共同点
 
 它们都指向同一个判断偏差：**我在设计时把 overlay 和「父原生 / 子 Web」这类混合形态想得太可行了。**
@@ -205,7 +241,7 @@ Swift 152 个用例、TS 199 个用例全绿，因为两边各测**自己手写�
 - G-2 → 不做「父原生子 Web」，父槽接管必须自下而上；
 - G-3 → 不做「半死不活」，控制通道失联即整体回落官方 UI。
 
-这条规律应该反写进 [ARCHITECTURE.md §4](../ARCHITECTURE.md)：**evacuated 是唯一的一等落位，overlay 不是「另一种选择」而是「例外」，且每个 overlay 都必须有明确的消失计划。**
+这条规律已反写进 [ARCHITECTURE.md §4](../ARCHITECTURE.md)：**evacuated 是一等落位，overlay 不是「另一种选择」而是「例外」，且每个 overlay 都必须可判定（G-1 的几何字段）并有明确的消失计划。** G-8 补上了另一半：**例外用在哪里，由插槽在官方 DOM 里的真实角色决定，不由观感推断。**
 
 ---
 
@@ -213,8 +249,9 @@ Swift 152 个用例、TS 199 个用例全绿，因为两边各测**自己手写�
 
 - [x] G-3：加 `surface/ping`/`pong` 与运行期失联降级（**W1 上线前**）—— 宿主发起、client 半回答，两端已实现并有测试
 - [x] G-2：把「父槽接管必须自下而上」写成 manifest 第 7 条规则并在 `manifest.ts` 强制
-- [ ] G-1：W4 规划时确认取消 `input.*` 的 overlay 过渡态，直接整块撤离 composer
-- [ ] 把「evacuated 是唯一一等落位」的结论反写进 ARCHITECTURE.md §4
+- [x] G-1：`slot/rect` 携带 `rect/clip/viewport/scrollable/occluded/dpr`，宿主用纯函数 `SlotGeometryResolver` 解析（W4 仍按计划取消 `input.*` 的 overlay 过渡态、整块撤离 composer）
+- [x] G-8：落位方式改由插槽在官方 DOM 里的真实角色决定；`sidebar.workspaces` 从 `evacuated` 改为受控 overlay，并把「裁剪型 / 滚动型 overflow」分成两个 bit
+- [x] 把「evacuated 是一等落位、overlay 是例外且必须可判定」的结论反写进 ARCHITECTURE.md §4
 - [x] G-4：宿主握手后读 `GET /studio/surface` 作为权威 manifest，`w1Default` 退化为兜底（并补齐规则 7 需要的第二行）
 - [x] G-5：把「渲染语义」与「启动期必须有实现」分开 —— `retired.mountsNativeView` 保持 `true`，暗槽不要求原生实现（`slotsRequiringNativeView`）
 - [x] G-6：时钟缝的默认值改成命名常量，并加运行时回归 + 源码守卫

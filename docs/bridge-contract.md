@@ -102,7 +102,7 @@ Web  → Native   { v:1, t:"res", id:"…", ok:true, p:{ applied:[...], rejected
 | `surface/pong` | `{ seq }` | `surface/ping` 的**等价单向形式**（§1.6）。宿主两种形态都算活体证据；client 半在两拍之间想主动证明自己还活着时用它，不必发明新方法 |
 | `slot/mount` | `{ slot, instanceId, key?, scope, props }` | 一个遮蔽条目被渲染了，原生该装配对应视图 |
 | `slot/props` | `{ instanceId, props }` | props 变化（已做浅 diff，只发变化字段） |
-| `slot/rect` | `{ instanceId, rect:{x,y,w,h}, scrollable }` | 几何上报，**仅 overlay 落位需要** |
+| `slot/rect` | `{ instanceId, rect, clip, viewport, scrollable, occluded, dpr }` | 几何上报，**仅 overlay 落位需要**（字段见 §1.7） |
 | `slot/unmount` | `{ instanceId }` | 条目卸载，原生该回收视图 |
 | `slot/error` | `{ slot, instanceId, error, abdicated }` | 来自 `ctx.slots.onEntryError`：我们的条目崩了；`abdicated:true` 表示官方实现已自动接管 |
 
@@ -144,6 +144,31 @@ Web  → Native   { v:1, t:"res", id:"…", ok:true, p:{ applied:[...], rejected
 | 判死动作 | **撤下所有原生插槽视图，官方 Web UI 接管**（与崩溃退位对齐，ADR-0004） | 判死后不自动复活：自动回摆会让界面在两种实现之间抖动 |
 
 client 半的义务只有一条：**`surface/ping` 的处理器必须在插件整个生命周期内保持安装**。未安装的处理器会回 `unknown_method`，宿主把它读成一次丢拍 —— 两拍即判死。`seq` 原样回抄，宿主用它识别「对端在回旧拍」（`staleReplyCount`）。
+
+---
+
+### 1.7 slot/rect 的几何（overlay 的落位契约）
+
+`overlay` 的语义是「**Web 侧留出这一格，原生视图精确填进去**」。要做到「精确」，宿主必须能回答三个问题，而第一版 `{ rect, scrollable }` 只能回答第一个：
+
+| 字段 | 类型 | 回答的问题 |
+| --- | --- | --- |
+| `rect` | `{x,y,w,h}` | 这一格在哪。`getBoundingClientRect()`，CSS px、视口坐标，已含祖先滚动 |
+| `clip` | `{x,y,w,h}` | **我能画到多远。** 祖先 `overflow` 裁剪链 ∩ 视口。没有裁剪祖先时等于视口 |
+| `viewport` | `{w,h}` | **CSS px 与 point 的比例是多少。** 宿主用 `WebView 点宽 / viewport.w` 求解 |
+| `scrollable` | boolean | 是否在**滚动**容器内（ADR-0003 的判据）。必填，宿主不给默认值 |
+| `occluded` | boolean | **我现在该不该画。** 这一格是否被 Web 侧内容完整盖住 |
+| `dpr` | number | 仅诊断。`devicePixelRatio` 是点→物理像素，**不是**本换算的系数 |
+
+三条硬规则：
+
+1. **`clip` ≠ `scrollable`。** `overflow: hidden` 只裁剪、不滚动，不构成 ADR-0003 的漂移源（内容不会在合成线程上独立移动）。把两者当成一个 bit，就只剩两个错答案：按 ADR-0003 拒掉这一格（原生视图永不出现），或者让它在折叠动画期间溢出到相邻区域上。W1 的目标插槽正好住在官方侧栏 `overflow: hidden` 的区域里，所以这不是理论问题。
+2. **比例来自 `viewport`，不是 `dpr`。** 视网膜下 `dpr = 2` 而 CSS px 与 point 恒为 1:1；拿 `dpr` 当系数的症状是原生视图正好大一倍。`pageZoom`、`<meta viewport>` 缩放全部被 `WebView 点宽 / viewport.w` 这一个比值吸收。
+3. **`occluded` 的方向是「不知道就保持可见」。** 无法判定（拿不到 `elementFromPoint`）时报 `false`：一个可能被浮层压住的原生视图，比一块凭空消失的 UI 容易发现得多。判定只在**完整**覆盖时为真 —— 部分覆盖交给 `clip` 与宿主的 mask。
+
+宿主侧的换算是纯函数（`SlotGeometryResolver`），`frame` 与 `visibleFrame` 分开：视图按完整 `frame` **布局**（否则文字会按被裁短的宽度换行），按 `visibleFrame` **呈现**。被完整遮挡或裁到零面积时整块不渲染。
+
+上报时机：`ResizeObserver`（格子自身变化）、`resize`（窗口）、`scroll`（capture，祖先滚动）。**几何不变则不发** —— 这三个源每帧都会触发，把没变的矩形也发上线等于给控制通道灌噪声。
 
 ---
 
