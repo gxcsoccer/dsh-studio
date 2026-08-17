@@ -70,16 +70,62 @@ DeepSeek 的设计是 **「一切皆插件」**（Everything is a plugin），�
 
 分层与扩展点见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
+## 迁移策略 / Migration
+
+不是「一次性重写一个客户端」，而是**以插槽为单位，逐个把官方 Web UI 换成 SwiftUI，直到 WebView 可以被拿掉。**
+
+官方 `dsh` 的 UI 本身就是一张**具名插槽表**（`ctx.slots`，约 35 个插槽，支持 `single` / `list` / `keyed` / `chain` 四种基数）。它规定 `priority` 升序、最小者渲染 —— 所以「换掉官方某块 UI」的正当做法是**在同一插槽上以更低 priority 注册我们自己的条目**，而不是用 CSS 把它藏起来。
+
+由此得到三条纲领：
+
+1. **迁移单位是插槽**，不是像素区域。粒度可以细到「一种消息卡片」（`conversation.chat.node` 是 `keyed`）。
+2. **每个插槽的状态是配置**（`web` → `mirrored` → `native` → `retired`），随时可热切回退；官方实现留在原地作为回落，崩溃时由官方 `abdicate` 机制自动接管。
+3. **领域数据永不经过 WebView** —— 控制通道只走插槽编排，会话/事件走 host 半的 loopback。于是终局删掉 WebView 是**删代码**，不是重写架构。
+
+| 波次 | 目标 |
+| --- | --- |
+| W1 | 侧栏（`sidebar.workspaces` 起步） |
+| W2 | 设置与详情面板 |
+| W3 | 会话标题栏、空态、浮层 |
+| W4 | 输入区（官方 `conversation.composer` 预留了 takeover 链） |
+| W5 | 转录整块原生化（最贵的一步） |
+| W6 | 消息卡片 / 工具视图按 key 收尾 |
+| W7 | `root` —— WebView 不再渲染任何 UI |
+| W8 | 拆除 WebView，**数据路径零改动** |
+
+完整设计见 [ARCHITECTURE.md](./ARCHITECTURE.md)、[docs/slot-map.md](./docs/slot-map.md)、[docs/migration-playbook.md](./docs/migration-playbook.md)。
+
 ## 状态 / Status
 
 早期。DeepSeek Harness 仍是 **developer preview**，核心插件和 API **会有破坏性变更**。本仓库跟着官方已发布的扩展点走（`apply` / `inject` / `Config` / `ctx.effect` / `session/event` / `ctx.agents`），而不是锁死一份 fork。
 
-当前提交只包含宣言与架构。桌面应用实现由后续工作完成。
+当前提交只包含宣言、架构与迁移设计。桌面应用实现由后续工作完成。
 
 ## 文档 / Docs
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — 分层、`studio` profile、官方扩展点
+**设计 / Design**
+
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — 分层、`studio` profile、官方扩展点、插槽遮蔽机制
 - [docs/product.md](./docs/product.md) — 首次运行、空状态、无障碍、签名、为何 v1 不做 App Sandbox
+
+**迁移 / Migration**
+
+- [docs/slot-map.md](./docs/slot-map.md) — 官方插槽全图、契约、落位与波次
+- [docs/migration-playbook.md](./docs/migration-playbook.md) — 单个插槽的七步流水线与验收门
+- [docs/surface-manifest.md](./docs/surface-manifest.md) — 插槽状态清单（控制面配置）
+- [docs/migration-ledger.md](./docs/migration-ledger.md) — 迁移账本与漂移记录
+- [docs/bridge-contract.md](./docs/bridge-contract.md) — 控制通道 / 数据通道协议
+- [docs/reference/native-slot-proxy.md](./docs/reference/native-slot-proxy.md) — 核心机制的参考实现
+
+**决策 / ADR**
+
+- [ADR-0001](./docs/adr/0001-slot-shadowing-over-css-hiding.md) — 用插槽遮蔽，不用 CSS 隐藏官方 UI
+- [ADR-0002](./docs/adr/0002-domain-data-bypasses-the-webview.md) — 领域数据不经过 WebView
+- [ADR-0003](./docs/adr/0003-no-overlay-inside-scroll-containers.md) — 滚动容器内部不做 overlay
+- [ADR-0004](./docs/adr/0004-keep-official-ui-as-fallback.md) — 保留官方 UI 插件作为回落
+
+**协作 / Contributing**
+
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — 插件优先，不要去 clone 上游
 
 ## 许可 / License
